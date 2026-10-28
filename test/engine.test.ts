@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { FlowEngine, NO, YES, type Flow, type FlowEngineEvent, type Messages, type Nlu, type Option, type Slots } from "../src/index.ts";
+import { END, FlowEngine, type ActionResult, type Flow, type FlowEngineEvent, type FlowSummary, type Messages, type Nlu, type Option, type Slots } from "../src/index.ts";
 
 // ───────────────────────── test flows: a small shop ─────────────────────────
 
@@ -10,7 +10,7 @@ let deliveredItems: Option[] = [];
 
 const confirmSlot = (summary: (slots: Slots) => string) => ({
   name: "confirm",
-  type: "yesno" as const,
+  type: "bool" as const,
   description: "consent to submit",
   question: (slots: Slots) => `${summary(slots)} Submit?`,
   prefill: false,
@@ -19,6 +19,7 @@ const confirmSlot = (summary: (slots: Slots) => string) => ({
 const refund: Flow = {
   name: "refund",
   title: "Refund",
+  description: "the customer wants to return an item that is fine",
   slots: [
     {
       name: "item",
@@ -48,8 +49,8 @@ const refund: Flow = {
     { kind: "collect", slot: "reason" },
     { kind: "goto", to: "complaint", when: (slots) => slots.reason === "broken" },
     { kind: "collect", slot: "confirm" },
-    { kind: "goto", to: "cancelled", when: (slots) => slots.confirm === NO },
-    { kind: "action", run: (slots) => `Refund created for ${slots.item}.` },
+    { kind: "goto", to: "cancelled", when: (slots) => slots.confirm === false },
+    { kind: "action", run: (slots) => ({ say: `Refund created for ${slots.item}.` }) },
     { kind: "end" },
     { id: "complaint", kind: "link", flow: "complaint", carry: ["item"], message: "Switching to a complaint." },
     { id: "cancelled", kind: "say", text: () => "Nothing submitted." },
@@ -66,7 +67,7 @@ const complaint: Flow = {
   steps: [
     { kind: "collect", slot: "item" },
     { kind: "collect", slot: "defect" },
-    { kind: "action", run: (slots) => `Complaint filed: ${slots.item} – ${slots.defect}.` },
+    { kind: "action", run: (slots) => ({ say: `Complaint filed: ${slots.item} – ${slots.defect}.` }) },
   ],
 };
 
@@ -76,7 +77,7 @@ const address: Flow = {
   slots: [{ name: "address", type: "text", description: "new address", question: () => "What is the new address?" }],
   steps: [
     { kind: "collect", slot: "address" },
-    { kind: "action", run: (slots) => `Address changed to ${slots.address}.` },
+    { kind: "action", run: (slots) => ({ say: `Address changed to ${slots.address}.` }) },
   ],
 };
 
@@ -84,8 +85,11 @@ const address: Flow = {
 
 const has = (text: string, ...words: string[]) => words.some((word) => text.toLowerCase().includes(word));
 
+let routedWith: FlowSummary[] = [];
+
 const keywordNlu: Nlu = {
-  async route(text) {
+  async route(text, flows) {
+    routedWith = flows;
     if (has(text, "refund", "return")) return "refund";
     if (has(text, "address")) return "address";
     return null;
@@ -107,8 +111,8 @@ const keywordNlu: Nlu = {
       }
       if (definition.name === "reason" && has(text, "broken")) values.reason = "broken";
       if (definition.name === "reason" && has(text, "unwanted")) values.reason = "unwanted";
-      if (definition.name === "confirm" && has(text, "yes")) values.confirm = YES;
-      if (definition.name === "confirm" && has(text, "nope")) values.confirm = NO;
+      if (definition.name === "confirm" && has(text, "yes")) values.confirm = true;
+      if (definition.name === "confirm" && has(text, "nope")) values.confirm = false;
       if (definition.name === "confirm" && has(text, "ano")) values.confirm = "ano";
       if (definition.name === "defect" && has(text, "leaks")) values.defect = "leaks";
       if (definition.name === "address" && /\d/.test(text)) values.address = text;
@@ -125,11 +129,11 @@ const keywordNlu: Nlu = {
 
 // ───────────────────────── harness ─────────────────────────
 
-function createEngine(messages?: Partial<Messages>) {
+function createEngine(messages?: Partial<Messages>, flows: Record<string, Flow> = { refund, complaint, address }) {
   const said: string[] = [];
   const events: FlowEngineEvent[] = [];
   const engine = new FlowEngine({
-    flows: { refund, complaint, address },
+    flows,
     nlu: keywordNlu,
     output: (text) => said.push(text),
     onEvent: (event) => events.push(event),
@@ -212,7 +216,7 @@ describe("options", () => {
     expect(engine.snapshot()).toEqual([]);
   });
 
-  it("rejects yes/no values other than YES and NO", async () => {
+  it("rejects bool values other than true and false", async () => {
     const { send } = createEngine();
     await send("refund the mug, unwanted");
     expect(await send("ano")).toEqual(["Sorry, I didn't quite get that.", "Returning mug. Submit?"]);
@@ -276,5 +280,92 @@ describe("messages", () => {
     const { send } = createEngine({ flowCancelled: (flowTitle) => `${flowTitle} zrušeno.` });
     await send("refund the mug");
     expect(await send("cancel")).toEqual(["Refund zrušeno."]);
+  });
+});
+
+describe("routing", () => {
+  it("passes every flow with its description to the NLU", async () => {
+    const { send } = createEngine();
+    await send("hello");
+    expect(routedWith).toContainEqual({ name: "refund", title: "Refund", description: "the customer wants to return an item that is fine" });
+    expect(routedWith.map((flow) => flow.name)).toEqual(["refund", "complaint", "address"]);
+  });
+});
+
+describe("actions", () => {
+  // the address flow, but the action looks the address up and decides with the slots it sets
+  const lookup: Flow = {
+    name: "address",
+    title: "Address change",
+    slots: [{ name: "address", type: "text", description: "new address", question: () => "What is the new address?" }],
+    steps: [
+      { kind: "collect", slot: "address" },
+      {
+        kind: "action",
+        run: async (slots): Promise<ActionResult> => {
+          await Promise.resolve(); // e.g. a database call
+          return String(slots.address).includes("Nowhere")
+            ? { say: "Unknown street.", setSlots: { address: null } }
+            : { setSlots: { zone: 2 } };
+        },
+      },
+      { kind: "goto", to: "address-unknown", when: (slots) => !("address" in slots) },
+      { kind: "say", text: (slots) => `Zone ${slots.zone}.` },
+      { kind: "goto", to: END },
+      { id: "address-unknown", kind: "set", values: { retried: true } },
+      { kind: "collect", slot: "address" },
+      { kind: "say", text: (slots) => `Retried: ${slots.retried}.` },
+    ],
+  };
+
+  it("awaits an async action and applies the slots it sets", async () => {
+    const { engine, send } = createEngine(undefined, { address: lookup });
+    expect(await send("address Main Street 8")).toEqual(["Zone 2."]);
+    expect(engine.snapshot()).toEqual([]);
+  });
+
+  it("deletes a slot set to null and sets slots with a set step", async () => {
+    const { send } = createEngine(undefined, { address: lookup });
+    expect(await send("address Nowhere 1")).toEqual(["Unknown street.", "What is the new address?"]);
+    expect(await send("Main Street 8")).toEqual(["Retried: true."]);
+  });
+});
+
+describe("prefill: false", () => {
+  const twice: Flow = {
+    name: "refund",
+    title: "Refund",
+    slots: [confirmSlot(() => "Sure?")],
+    steps: [
+      { kind: "collect", slot: "confirm" },
+      { kind: "say", text: () => "Once more." },
+      { id: "again", kind: "collect", slot: "confirm" },
+      { kind: "say", text: (slots) => `Confirmed: ${slots.confirm}.` },
+    ],
+  };
+
+  it("asks again for a value answered on an earlier pass", async () => {
+    const { send } = createEngine(undefined, { refund: twice });
+    expect(await send("refund")).toEqual(["Sure? Submit?"]);
+    expect(await send("yes")).toEqual(["Once more.", "Sure? Submit?"]);
+    expect(await send("nope")).toEqual(["Confirmed: false."]);
+  });
+
+  it("asks again for a carried value", async () => {
+    const { engine, send } = createEngine(undefined, { refund: twice });
+    await engine.start("refund", undefined, { confirm: true });
+    expect(await send("yes")).toEqual(["Once more.", "Sure? Submit?"]);
+  });
+});
+
+describe("validation", () => {
+  const broken = (patch: Partial<Flow>): Record<string, Flow> => ({ address: { ...address, ...patch } });
+
+  it("rejects broken references when the engine is created", () => {
+    expect(() => createEngine(undefined, broken({ steps: [{ kind: "collect", slot: "zip" }] }))).toThrow("Flow address: collects unknown slot zip");
+    expect(() => createEngine(undefined, broken({ steps: [{ kind: "goto", to: "nowhere" }] }))).toThrow("goto to unknown step nowhere");
+    expect(() => createEngine(undefined, broken({ steps: [{ kind: "link", flow: "refund", carry: [] }] }))).toThrow("links to unknown flow refund");
+    expect(() => createEngine(undefined, broken({ name: "addr" }))).toThrow(`is registered as "address" but named "addr"`);
+    expect(() => createEngine(undefined, broken({ steps: [{ id: "a", kind: "end" }, { id: "a", kind: "end" }] }))).toThrow("step id a is used twice");
   });
 });

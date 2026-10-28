@@ -10,6 +10,7 @@ What it handles for you:
 
 - **Prefill**: slots mentioned in the opening message are filled at once and their questions skipped.
 - **Validation**: business rules live in code (`validate`), never in a prompt, and apply to prefilled values too.
+- **Actions**: sync or async code that says something and sets slots the following steps decide on.
 - **Options**: choice slots offer only valid values. A single option is picked without asking.
 - **Turn types**: an answer, a question about the step, a digression, a task switch, or a cancel.
 - **Flow stack**: a task switch parks the current flow and resumes it afterwards.
@@ -28,11 +29,12 @@ The package is ESM-only and requires Node `^22.12.0 || ^24.0.0 || >=26.0.0`.
 ## Usage
 
 ```ts
-import { FlowEngine, NO, type Flow, type Nlu } from "@gallas-ai/flow-engine";
+import { FlowEngine, type Flow, type Nlu } from "@gallas-ai/flow-engine";
 
 const refund: Flow = {
   name: "refund",
   title: "Refund",
+  description: "The customer wants to return an item that is fine and get the money back.",
   slots: [
     {
       name: "item",
@@ -41,13 +43,19 @@ const refund: Flow = {
       question: () => "What do you want to return?",
       options: () => [{ value: "mug", label: "Mug" }],
     },
-    { name: "confirm", type: "yesno", description: "consent", question: () => "Submit?", prefill: false },
+    { name: "confirm", type: "bool", description: "consent", question: () => "Submit?", prefill: false },
   ],
   steps: [
     { kind: "collect", slot: "item" },
     { kind: "collect", slot: "confirm" },
-    { kind: "goto", to: "cancelled", when: (slots) => slots.confirm === NO },
-    { kind: "action", run: (slots) => `Refund created for ${slots.item}.` },
+    { kind: "goto", to: "cancelled", when: (slots) => slots.confirm === false },
+    {
+      kind: "action",
+      run: async (slots) => {
+        const number = await shop.createRefund(slots.item); // your code
+        return { say: `Refund ${number} created.`, setSlots: { refundNumber: number } };
+      },
+    },
     { kind: "end" },
     { id: "cancelled", kind: "say", text: () => "Nothing submitted." },
   ],
@@ -71,16 +79,23 @@ console.log(engine.snapshot()); // the flow stack as data
 |---|---|
 | `collect` | Asks for a slot, or skips the step when the slot is already filled |
 | `say` | Says a text |
-| `action` | Runs code and says its result |
-| `goto` | Jumps to the step with the given `id` when the condition holds |
+| `action` | Runs (possibly async) code; it returns `{ say?, setSlots? }`, and `null` in `setSlots` deletes a slot |
+| `set` | Sets slots to fixed values (`null` deletes) |
+| `goto` | Jumps to the step with the given `id`, or to `END`, when `when` holds; without `when` it always jumps |
 | `link` | Replaces the current flow with another one and carries the listed slots over |
 | `end` | Ends the flow; a parked flow below it resumes |
+
+Slots hold strings (`text`, `choice`), booleans (`bool`) or numbers (`number`). A slot with `prefill: false` is always asked
+by the engine itself: it is never taken from an earlier message, and a value it already holds (carried over, set by an
+action, or answered on an earlier pass through a loop) is asked again. Use it for consent.
+
+The engine checks the flows when it is created and throws on broken references: an unknown slot, step id or linked flow.
 
 ## The `Nlu` interface
 
 ```ts
 interface Nlu {
-  route(text): Promise<string | null>; // which flow does this message start?
+  route(text, flows): Promise<string | null>; // which flow does this message start? flows = [{ name, title, description }]
   classifyTurn(flowTitle, question, text): Promise<TurnType>; // "answer" | "step_question" | "digression" | "task_switch" | "cancel"
   extract(flow, wanted, slots, text, question?): Promise<Extraction>; // { values, notAmongOptions }
   choose(question, text, options): Promise<string | null>; // value of the picked option
@@ -88,7 +103,7 @@ interface Nlu {
 }
 ```
 
-Yes/no slots hold the exported constants `YES` and `NO`. `notAmongOptions` lists the choice slots for which the user named something
+`extract` returns typed values: `true` / `false` for bool slots, numbers for number slots. `notAmongOptions` lists the choice slots for which the user named something
 that isn't offered. The engine then says the slot's `notAvailable` text and won't auto-select the only option.
 
 ## Development

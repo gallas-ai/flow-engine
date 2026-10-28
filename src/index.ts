@@ -1,15 +1,18 @@
 export { FlowEngine, type FlowEngineOptions } from "./engine.ts";
 export { defaultMessages } from "./messages.ts";
-export { NO, TURN_TYPES, YES } from "./types.ts";
+export { END, TURN_TYPES } from "./types.ts";
 export type {
+  ActionResult,
   Extraction,
   Flow,
   FlowEngineEvent,
+  FlowSummary,
   FrameSnapshot,
   Messages,
   Nlu,
   Option,
   SlotDefinition,
+  SlotValue,
   Slots,
   Step,
   TurnType,

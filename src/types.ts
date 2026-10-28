@@ -1,12 +1,14 @@
-/** Slot values collected so far, keyed by slot name. */
-export type Slots = Record<string, string>;
+/** One slot value: text and choice slots hold strings, bool slots booleans, number slots numbers. */
+export type SlotValue = string | number | boolean;
+
+/** Slot values collected so far, keyed by slot name. A slot that isn't set has no key. */
+export type Slots = Record<string, SlotValue>;
 
 /** One value offered for a choice slot. */
 export type Option = { value: string; label: string };
 
-/** The two values a yes/no slot can hold. */
-export const YES = "yes";
-export const NO = "no";
+/** The step id a `goto` uses to end the flow. */
+export const END = "END";
 
 export type SlotDefinition = {
   name: string;
@@ -15,29 +17,47 @@ export type SlotDefinition = {
   question: (slots: Slots) => string;
   /** Used when the user asks about this step ("why do you need it?"). */
   help?: string;
-  /** text = free text, yesno = YES / NO, choice = the value of one of `options` */
-  type: "text" | "yesno" | "choice";
+  /** text = free text, bool = true / false, number = a finite number, choice = the value of one of `options` */
+  type: "text" | "bool" | "number" | "choice";
   options?: (slots: Slots) => Option[];
   /** Said when the user names something that isn't among the options. */
   notAvailable?: string;
   /** Said when there are no options at all – the flow ends. */
   noOptions?: string;
   /** Business rules in code, never in the prompt. Returns an error message or null. */
-  validate?: (value: string, slots: Slots) => string | null;
-  /** false = never take it from an earlier message, always ask (consent, confirmation!). */
+  validate?: (value: SlotValue, slots: Slots) => string | null;
+  /**
+   * false = the engine always asks itself (consent, confirmation!): the slot is never taken from an earlier message,
+   * and a value it already holds (carried, set by an action, answered on an earlier pass) is asked again.
+   */
   prefill?: boolean;
 };
+
+/** What an action says and which slots it changes; null deletes a slot. */
+export type ActionResult = { say?: string | string[]; setSlots?: Record<string, SlotValue | null> };
 
 export type Step = { id?: string } & (
   | { kind: "collect"; slot: string }
   | { kind: "say"; text: (slots: Slots) => string }
-  | { kind: "goto"; to: string; when: (slots: Slots) => boolean }
-  | { kind: "link"; flow: string; carry: string[]; message: string }
-  | { kind: "action"; run: (slots: Slots) => string }
+  /** Jumps to the step with id `to` (or END) when `when` holds; without `when` it always jumps. */
+  | { kind: "goto"; to: string; when?: (slots: Slots) => boolean }
+  | { kind: "set"; values: Record<string, SlotValue | null> }
+  | { kind: "link"; flow: string; carry: string[]; message?: string }
+  | { kind: "action"; run: (slots: Slots) => ActionResult | void | Promise<ActionResult | void> }
   | { kind: "end" }
 );
 
-export type Flow = { name: string; title: string; slots: SlotDefinition[]; steps: Step[] };
+export type Flow = {
+  name: string;
+  title: string;
+  /** When this flow applies – passed to `Nlu.route` so the NLU can pick the flow. */
+  description?: string;
+  slots: SlotDefinition[];
+  steps: Step[];
+};
+
+/** What `Nlu.route` gets to know about each flow. */
+export type FlowSummary = { name: string; title: string; description?: string };
 
 /** How a message relates to the question the engine is waiting on. */
 export const TURN_TYPES = ["answer", "step_question", "digression", "task_switch", "cancel"] as const;
@@ -53,8 +73,8 @@ export type Extraction = {
 
 /** Everything the engine needs from language understanding. */
 export interface Nlu {
-  /** Which flow does this message start? null = just answer it. */
-  route(text: string): Promise<string | null>;
+  /** Which of `flows` does this message start? Returns its name, or null = just answer it. */
+  route(text: string, flows: FlowSummary[]): Promise<string | null>;
   classifyTurn(flowTitle: string, question: string, text: string): Promise<TurnType>;
   /** Values for any of the `wanted` slots the message contains. */
   extract(flow: Flow, wanted: SlotDefinition[], slots: Slots, text: string, question?: string): Promise<Extraction>;

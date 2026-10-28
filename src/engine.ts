@@ -4,10 +4,19 @@
 // this deterministic code following the flow definition. The engine doesn't import any LLM code –
 // it gets an `Nlu` implementation injected, so it runs just as well with a fake keyword NLU in tests.
 import { defaultMessages } from "./messages.ts";
-import { NO, YES } from "./types.ts";
-import type { Flow, FlowEngineEvent, FrameSnapshot, Messages, Nlu, SlotDefinition, Slots } from "./types.ts";
+import { END } from "./types.ts";
+import type { Flow, FlowEngineEvent, FlowSummary, FrameSnapshot, Messages, Nlu, SlotDefinition, SlotValue, Slots } from "./types.ts";
 
-type Frame = { flow: Flow; step: number; slots: Slots; waitingFor?: string; attempts: number; noAutoSelect: Set<string> };
+type Frame = {
+  flow: Flow;
+  step: number;
+  slots: Slots;
+  waitingFor?: string;
+  attempts: number;
+  noAutoSelect: Set<string>;
+  /** Slots filled as the answer to their own question – a prefill: false slot is taken only from such an answer. */
+  answered: Set<string>;
+};
 
 export type FlowEngineOptions = {
   flows: Record<string, Flow>;
@@ -22,13 +31,16 @@ export type FlowEngineOptions = {
 export class FlowEngine {
   private readonly stack: Frame[] = [];
   private readonly flows: Record<string, Flow>;
+  private readonly summaries: FlowSummary[];
   private readonly nlu: Nlu;
   private readonly output: (text: string) => void;
   private readonly emit: (event: FlowEngineEvent) => void;
   private readonly messages: Messages;
 
   constructor(options: FlowEngineOptions) {
+    validateFlows(options.flows);
     this.flows = options.flows;
+    this.summaries = Object.values(options.flows).map(({ name, title, description }) => ({ name, title, description }));
     this.nlu = options.nlu;
     this.output = options.output;
     this.emit = options.onEvent ?? (() => {});
@@ -42,7 +54,7 @@ export class FlowEngine {
   async handle(text: string): Promise<void> {
     const frame = this.top;
     if (!frame?.waitingFor) {
-      const flow = await this.nlu.route(text);
+      const flow = await this.nlu.route(text, this.summaries);
       this.emit({ type: "routed", flow });
       if (flow) return this.start(flow, text);
       return this.output(await this.nlu.answer(text));
@@ -66,7 +78,7 @@ export class FlowEngine {
         this.output(await this.nlu.answer(text, turnType === "step_question" ? { question: slot.question(frame.slots), help: slot.help } : undefined));
         return this.advance(true);
       case "task_switch": {
-        const flow = await this.nlu.route(text);
+        const flow = await this.nlu.route(text, this.summaries);
         if (flow && flow !== frame.flow.name) {
           this.output(this.messages.flowParked(frame.flow.title));
           return this.start(flow, text);
@@ -84,7 +96,7 @@ export class FlowEngine {
   async start(name: string, text?: string, carried: Slots = {}): Promise<void> {
     const flow = this.flows[name];
     if (!flow) throw new Error(`Unknown flow ${name}`);
-    const frame: Frame = { flow, step: 0, slots: { ...carried }, attempts: 0, noAutoSelect: new Set() };
+    const frame: Frame = { flow, step: 0, slots: { ...carried }, attempts: 0, noAutoSelect: new Set(), answered: new Set() };
     this.stack.push(frame);
     this.emit({ type: "flowStarted", flow: flow.name, title: flow.title, carried: Object.keys(carried) });
     if (text) await this.fill(frame, text, true); // ← PREFILL from the opening message
@@ -128,9 +140,7 @@ export class FlowEngine {
         continue;
       }
       const value = values[definition.name];
-      if (!value) continue;
-      if (definition.type === "yesno" && value !== YES && value !== NO) continue;
-      if (definition.type === "choice" && !definition.options!(frame.slots).some((option) => option.value === value)) continue;
+      if (value === undefined || value === "" || !this.hasType(definition, value, frame.slots)) continue;
       const error = definition.validate?.(value, frame.slots);
       if (error) {
         this.output(error);
@@ -141,7 +151,10 @@ export class FlowEngine {
       frame.slots[definition.name] = value;
       filled.push(definition.name);
     }
-    if (waiting && filled.includes(waiting.name)) frame.attempts = 0; // the next question starts with a clean count
+    if (waiting && filled.includes(waiting.name)) {
+      frame.attempts = 0; // the next question starts with a clean count
+      frame.answered.add(waiting.name);
+    }
     return { filled, reported };
   }
 
@@ -164,8 +177,12 @@ export class FlowEngine {
 
       switch (step.kind) {
         case "collect": {
-          if (step.slot in frame.slots) { frame.step++; continue; } // ← prefilled = step skipped
           const definition = this.slotDefinition(frame.flow, step.slot);
+          const answered = frame.answered.delete(step.slot);
+          if (step.slot in frame.slots) {
+            if (definition.prefill !== false || answered) { frame.step++; continue; } // ← prefilled = step skipped
+            delete frame.slots[step.slot]; // carried, set by an action or answered on an earlier pass → ask again
+          }
           const options = definition.options?.(frame.slots);
           if (options && options.length === 0) {
             this.output(definition.noOptions ?? this.messages.noOptions());
@@ -187,17 +204,24 @@ export class FlowEngine {
           this.output(step.text(frame.slots));
           frame.step++;
           continue;
-        case "action":
-          this.output(step.run(frame.slots));
+        case "action": {
+          const result = await step.run({ ...frame.slots });
+          if (result?.setSlots) setSlots(frame.slots, result.setSlots);
+          for (const text of [result?.say ?? []].flat()) this.output(text);
+          frame.step++;
+          continue;
+        }
+        case "set":
+          setSlots(frame.slots, step.values);
           frame.step++;
           continue;
         case "goto":
-          frame.step = step.when(frame.slots) ? this.indexOf(frame.flow, step.to) : frame.step + 1;
+          frame.step = !step.when || step.when(frame.slots) ? this.indexOf(frame.flow, step.to) : frame.step + 1;
           continue;
         case "link": {
           // e.g. a "return" turns out to be a "complaint": replace the flow, keep what we know
           this.stack.pop();
-          this.output(step.message);
+          if (step.message) this.output(step.message);
           const carried = Object.fromEntries(step.carry.filter((name) => name in frame.slots).map((name) => [name, frame.slots[name]!]));
           return this.start(step.flow, undefined, carried);
         }
@@ -211,7 +235,17 @@ export class FlowEngine {
     return definition;
   }
 
+  private hasType(definition: SlotDefinition, value: SlotValue, slots: Slots): boolean {
+    switch (definition.type) {
+      case "text": return typeof value === "string";
+      case "bool": return typeof value === "boolean";
+      case "number": return typeof value === "number" && Number.isFinite(value);
+      case "choice": return definition.options!(slots).some((option) => option.value === value);
+    }
+  }
+
   private indexOf(flow: Flow, id: string): number {
+    if (id === END) return flow.steps.length;
     const index = flow.steps.findIndex((step) => step.id === id);
     if (index < 0) throw new Error(`Flow ${flow.name} has no step ${id}`);
     return index;
@@ -226,5 +260,33 @@ export class FlowEngine {
       waitingFor: frame.waitingFor ?? null,
       slots: { ...frame.slots },
     }));
+  }
+}
+
+function setSlots(slots: Slots, values: Record<string, SlotValue | null>): void {
+  for (const [name, value] of Object.entries(values)) {
+    if (value === null) delete slots[name];
+    else slots[name] = value;
+  }
+}
+
+/** Catches broken references when the engine is created, not in the middle of a conversation. */
+function validateFlows(flows: Record<string, Flow>): void {
+  for (const [key, flow] of Object.entries(flows)) {
+    const fail = (message: string) => { throw new Error(`Flow ${key}: ${message}`); };
+    if (flow.name !== key) fail(`is registered as "${key}" but named "${flow.name}"`);
+    for (const slot of flow.slots) {
+      if (slot.type === "choice" && !slot.options) fail(`choice slot ${slot.name} has no options`);
+    }
+    const ids = flow.steps.flatMap((step) => (step.id === undefined ? [] : [step.id]));
+    for (const id of ids) {
+      if (id === END) fail(`step id ${END} is reserved`);
+      if (ids.indexOf(id) !== ids.lastIndexOf(id)) fail(`step id ${id} is used twice`);
+    }
+    for (const step of flow.steps) {
+      if (step.kind === "collect" && !flow.slots.some((slot) => slot.name === step.slot)) fail(`collects unknown slot ${step.slot}`);
+      if (step.kind === "goto" && step.to !== END && !ids.includes(step.to)) fail(`goto to unknown step ${step.to}`);
+      if (step.kind === "link" && !flows[step.flow]) fail(`links to unknown flow ${step.flow}`);
+    }
   }
 }
