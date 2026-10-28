@@ -1,7 +1,6 @@
 {
   "name": "@gallas-ai/flow-engine",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "description": "Declarative flow engine for task-oriented conversations: the LLM understands, deterministic flows decide",
   "keywords": [
@@ -14,15 +13,40 @@
   ],
   "author": "Milan Gallas",
   "license": "MIT",
-  "exports": "./src/index.ts",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gallas-ai/flow-engine.git"
+  },
+  "homepage": "https://github.com/gallas-ai/flow-engine#readme",
+  "bugs": {
+    "url": "https://github.com/gallas-ai/flow-engine/issues"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": "^22.12.0 || ^24.0.0 || >=26.0.0"
   },
   "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "check:package": "publint && attw --pack --profile esm-only",
+    "prepublishOnly": "npm run build",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.5",
+    "publint": "^0.3.25",
     "typescript": "^7.0.2",
     "vitest": "5.0.5"
   }
