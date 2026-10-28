@@ -1,0 +1,26 @@
+{
+  "name": "@gallas-ai/flow-engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Declarative flow engine for task-oriented conversations: the LLM understands, deterministic flows decide",
+  "keywords": [
+    "chatbot",
+    "dialogue",
+    "flows",
+    "slot-filling",
+    "llm",
+    "nlu"
+  ],
+  "author": "Milan Gallas",
+  "license": "MIT",
+  "exports": "./src/index.ts",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vitest": "5.0.5"
+  }
+}
