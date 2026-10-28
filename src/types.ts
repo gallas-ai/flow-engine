@@ -36,6 +36,9 @@ export type SlotDefinition = {
 /** What an action says and which slots it changes; null deletes a slot. */
 export type ActionResult = { say?: string | string[]; setSlots?: Record<string, SlotValue | null> };
 
+/** Code run by an `action` step; it gets a copy of the slots. */
+export type Action = (slots: Slots) => ActionResult | void | Promise<ActionResult | void>;
+
 export type Step = { id?: string } & (
   | { kind: "collect"; slot: string }
   | { kind: "say"; text: (slots: Slots) => string }
@@ -43,7 +46,7 @@ export type Step = { id?: string } & (
   | { kind: "goto"; to: string; when?: (slots: Slots) => boolean }
   | { kind: "set"; values: Record<string, SlotValue | null> }
   | { kind: "link"; flow: string; carry: string[]; message?: string }
-  | { kind: "action"; run: (slots: Slots) => ActionResult | void | Promise<ActionResult | void> }
+  | { kind: "action"; run: Action }
   | { kind: "end" }
 );
 

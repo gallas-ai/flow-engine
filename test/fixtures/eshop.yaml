@@ -1,0 +1,157 @@
+# lessons/06-flows/flows.ts rewritten as Rasa flows.
+# Like flows.ts, this file reads as the support team's process documentation: no prompts, no LLM calls.
+# Business rules that need data (30 days since delivery) are computed by actions, but the decision is visible here.
+flows:
+  vraceni:
+    name: Vrácení zboží
+    description: >-
+      Zákazník chce vrátit zboží, které je v pořádku (nelíbí se, nehodí se, rozmyslel si to), a dostat peníze zpět.
+      Pokud je zboží vadné nebo rozbité, jde o reklamaci.
+    # carry: ["item"] from flows.ts – the item survives the end of this flow, so the linked complaint skips its question
+    persisted_slots:
+      - item
+    steps:
+      - id: ask_item
+        collect: item
+        description: produkt, který chce vrátit, jak ho zákazník pojmenoval (např. 'Brazílie', 'moka konvička')
+      # resolution + validation: finds the delivered item ("P06@1038") and how many days ago it arrived
+      - action: action_resolve_item
+        next:
+          - if: slots.item is null
+            then:
+              - action: utter_item_not_delivered
+                next: ask_item
+          - if: slots.item_days > 30
+            then:
+              - action: utter_return_window_expired # "…vrátit lze jen do 30 dnů. Pokud je vadné, můžeš ho reklamovat."
+              - set_slots:
+                  - item: null
+                next: ask_item
+          - else: ask_reason
+      - id: ask_reason
+        collect: reason
+        description: >-
+          důvod vrácení: nehodi_se = nehodí se, nechutná, rozmyslel si to;
+          vadne = je vadné, rozbité, poškozené, zatuchlé
+        next:
+          # a defective product is not a return but a complaint → switch flows, keep the item
+          - if: slots.reason = "vadne"
+            then: switch_to_complaint
+          - else: ask_refund
+      - id: ask_refund
+        collect: refund
+        description: jak vrátit peníze (na účet do 14 dnů, nebo kredit s bonusem 10 %)
+      # consent is never prefilled: ask_before_filling clears the slot and always asks (prefill: false in flows.ts)
+      - collect: confirm_return
+        ask_before_filling: true
+        next:
+          - if: not slots.confirm_return
+            then:
+              - action: utter_nothing_sent
+                next: END
+          - else: create_return
+      - id: create_return
+        action: action_create_return
+        next: END
+      - id: switch_to_complaint
+        action: utter_switch_to_complaint # "Když je zboží vadné, jde o reklamaci… Přepínám, zboží už mám. 🔧"
+      - link: reklamace
+
+  reklamace:
+    name: Reklamace
+    description: >-
+      Zboží je vadné, rozbité, nefunguje nebo bylo poškozené při dopravě a zákazník chce opravu, výměnu
+      nebo peníze zpět.
+    steps:
+      - id: ask_item
+        collect: item # already filled when we came from vraceni → skipped
+        description: vadný produkt, jak ho zákazník pojmenoval
+      - action: action_resolve_item
+        next:
+          - if: slots.item is null
+            then:
+              - action: utter_item_not_delivered
+                next: ask_item
+          - if: slots.item_days > 730
+            then:
+              - action: utter_warranty_expired
+                next: END
+          - else: ask_defect
+      - id: ask_defect
+        collect: defect
+        description: popis vady vlastními slovy zákazníka (co nefunguje, jak se to projevuje), např. 'teče u těsnění'
+      - collect: resolution
+        description: jaké řešení reklamace chce (oprava, výměna za nový kus, vrácení peněz)
+      - collect: confirm_complaint
+        ask_before_filling: true
+        next:
+          - if: not slots.confirm_complaint
+            then:
+              - action: utter_complaint_not_created
+                next: END
+          - else: create_complaint
+      - id: create_complaint
+        action: action_create_complaint
+
+  zmena_adresy:
+    name: Změna adresy
+    description: Zákazník chce změnit doručovací adresu u objednávky, která ještě nebyla odeslána.
+    steps:
+      # lesson 4: only unshipped orders make sense; exactly one → selected without asking
+      - action: action_find_orders_for_address
+        next:
+          - if: slots.order_candidate_count = 0
+            then:
+              - action: utter_no_unshipped_order
+                next: END
+          - else: ask_order
+      - id: ask_order
+        collect: order_id
+        # the fix from the custom tab ("tu poslední"): context in the description, not a smarter model
+        description: >-
+          objednávka, u které chce změnit adresu (změnit jde jen u neodeslaných, ty bot nabídl;
+          „poslední“ = nejnovější z nich). Vyplň číslo objednávky, např. 1045.
+        ask_before_filling: false
+      - collect: address
+        description: nová doručovací adresa (ulice, číslo, město)
+        rejections:
+          - if: not (slots.address matches ".*[0-9].*")
+            utter: utter_address_needs_number
+      - action: action_change_address
+
+slots:
+  reason:
+    type: choice
+    options:
+      - { value: nehodi_se, label: nehodí se }
+      - { value: vadne, label: je vadné }
+  refund:
+    type: choice
+    options:
+      - { value: ucet, label: na účet }
+      - { value: kredit, label: kredit +10 % }
+  confirm_return: { type: bool }
+  confirm_complaint: { type: bool }
+  order_id:
+    type: choice
+    options: unshipped_orders # computed in code
+    no_options: Nemáš žádnou neodeslanou objednávku.
+
+responses:
+  utter_ask_item: Jaké zboží?
+  utter_ask_reason: Proč ho vracíš?
+  utter_ask_refund: Jak ti máme vrátit peníze?
+  utter_ask_confirm_return: "Vracíš {item}, peníze: {refund}. Odeslat?"
+  utter_ask_defect: Co je s ním za problém?
+  utter_ask_resolution: Jaké řešení chceš?
+  utter_ask_confirm_complaint: "Reklamace {item}: {defect}, řešení: {resolution}. Odeslat?"
+  utter_ask_order_id: U které objednávky?
+  utter_ask_address: Na jakou adresu?
+  utter_item_not_delivered: Tohle zboží mezi doručenými nevidím.
+  utter_return_window_expired: Zboží jsi dostal před {item_days} dny, vrátit lze jen do 30 dnů. Pokud je vadné, můžeš ho reklamovat.
+  utter_warranty_expired: Záruka 24 měsíců už skončila.
+  utter_nothing_sent: Dobře, nic jsem neodeslal.
+  utter_complaint_not_created: Dobře, reklamaci nezakládám.
+  utter_switch_to_complaint: Když je zboží vadné, jde o reklamaci. Přepínám, zboží už mám. 🔧
+  utter_no_unshipped_order: Nemáš žádnou neodeslanou objednávku.
+  utter_address_needs_number: Adresa potřebuje číslo popisné.
