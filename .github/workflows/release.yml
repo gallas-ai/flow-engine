@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+permissions:
+  contents: write # gh release create
+  id-token: write # npm trusted publishing (OIDC) and provenance
+
+jobs:
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      # Trusted publishing needs npm >= 11.5.1.
+      - run: npm install -g npm@^11.5.1
+
+      - name: Check that the tag matches package.json
+        run: |
+          expected_tag="v$(node -p "require('./package.json').version")"
+          if [ "$expected_tag" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match package.json version $expected_tag" >&2
+            exit 1
+          fi
+
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      - run: npm test
+
+      - run: npm run build
+
+      - run: npm run check:package
+
+      # Skipped when the version is already on npm (the manual 0.1.0, or a re-run after a failed release step).
+      # --ignore-scripts publishes the dist checked above instead of rebuilding it in prepublishOnly.
+      - name: Publish
+        run: |
+          if [ -n "$(npm view "$(node -p "require('./package.json').name")@${GITHUB_REF_NAME#v}" version 2>/dev/null)" ]; then
+            echo "${GITHUB_REF_NAME#v} is already on npm, skipping publish"
+          else
+            npm publish --ignore-scripts
+          fi
+
+      - run: gh release create "$GITHUB_REF_NAME" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -17,6 +17,14 @@ What it handles for you:
 
 The engine is language-neutral. Every text it says on its own can be replaced through `messages`.
 
+## Installation
+
+```bash
+npm install @gallas-ai/flow-engine
+```
+
+The package is ESM-only and requires Node `^22.12.0 || ^24.0.0 || >=26.0.0`.
+
 ## Usage
 
 ```ts
@@ -91,6 +99,20 @@ Requires Node `^22.12.0 || ^24.0.0 || >=26.0.0` (the versions vitest supports).
 npm install
 npm test          # vitest
 npm run typecheck
+npm run build         # compiles src/ to dist/
+npm run check:package # publint + attw on the packed package
 ```
 
-There is no build step: the package exports its TypeScript sources directly.
+## Releasing
+
+Releases are published to npm from GitHub Actions when a `v*` tag is pushed:
+
+```bash
+npm version minor # or patch; commits and tags
+git push --follow-tags
+```
+
+The release workflow checks that the tag matches `package.json`, runs the checks, publishes with npm trusted publishing
+and creates a GitHub Release. A version that is already on npm is not published again, so a tag for the manually
+published `0.1.0`, or a re-run, only creates the GitHub Release. The trusted publisher (`gallas-ai/flow-engine`,
+workflow `release.yml`) must be set up on npmjs.com before the first tag push.
