@@ -85,7 +85,12 @@ that isn't offered. The engine then says the slot's `notAvailable` text and won'
 
 ## Development
 
+Requires Node `^22.12.0 || ^24.0.0 || >=26.0.0` (the versions vitest supports).
+
 ```bash
+npm install
 npm test          # vitest
 npm run typecheck
 ```
+
+There is no build step: the package exports its TypeScript sources directly.
