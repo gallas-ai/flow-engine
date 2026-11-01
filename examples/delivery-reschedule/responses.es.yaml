@@ -1,0 +1,5 @@
+responses:
+  utter_ask_order_number: ¿Cuál es su número de pedido?
+  utter_ask_delivery_day: ¿Qué día se lo entregamos?
+  utter_ask_confirmed: ¿Cambio la entrega del pedido {order_number}?
+  utter_delivery_kept: De acuerdo, la entrega se queda como estaba.

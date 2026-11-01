@@ -1,0 +1,25 @@
+# Rescheduling a parcel delivery. Only the flow logic: the texts are in responses.<language>.yaml.
+slots:
+  delivery_day:
+    type: choice
+    options: delivery_days # code: the days the courier can come, labelled in the customer's language
+  confirmed:
+    type: bool
+
+flows:
+  reschedule_delivery:
+    name: Delivery reschedule # also in Czech and Spanish messages: the title isn't translated
+    description: The customer wants their parcel delivered on a different day.
+    steps:
+      - collect: order_number
+        description: the order number, e.g. 10234
+      - collect: delivery_day
+        description: the day the customer wants the parcel delivered
+      - collect: confirmed
+        description: whether the customer confirms the new delivery day
+        ask_before_filling: true
+        next:
+          - if: not slots.confirmed
+            then:
+              - action: utter_delivery_kept
+      - action: action_reschedule_delivery # code: books the courier and says when the parcel arrives

@@ -233,6 +233,28 @@ engine.snapshot(); // the flow stack as data: flow, step, the question it waits 
 The engine's own texts (not understood, flow parked, flow cancelled, back to…, the option list format) are in
 `defaultMessages`; `messages` replaces any of them.
 
+## Multiple languages
+
+The engine has no language setting: a conversation is one engine, created with everything in the customer's language.
+Pick the language before the first message. `route`, `classifyTurn`, `extract` and `choose` of the Claude NLU above
+understand any language as they are; only `answer` writes to the customer, so give each language an NLU that answers
+in it:
+
+```ts
+/** claudeNlu, but free answers come in the customer's language. */
+const claudeNluIn = (language: string): Nlu => ({
+  ...claudeNlu,
+  answer: (text, step) => claudeNlu.answer(`${text}\n\n(Answer in ${language}.)`, step),
+});
+
+const nlu = { en: claudeNlu, cs: claudeNluIn("Czech"), es: claudeNluIn("Spanish") };
+const engine = new FlowEngine({ flows: flows[language], nlu: nlu[language], messages: messages[language], output: send });
+```
+
+Slot descriptions and flow descriptions can stay in English for every language; only the NLU reads them. The
+[delivery-reschedule](https://github.com/gallas-ai/flow-engine/tree/main/examples/delivery-reschedule) example shows
+the whole setup: responses per language, translated `messages` and translated choice-option labels.
+
 ## Example: a chat in the terminal
 
 The engine keeps the state of one conversation, so each conversation gets its own engine. A complete bot to try the

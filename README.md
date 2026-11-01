@@ -20,7 +20,8 @@ What it handles for you:
 - **Links**: one flow can hand over to another and carry values along.
 - **YAML**: flows can be written as YAML that reads like the support team's process documentation.
 
-The engine is language-neutral. Every text it says on its own can be replaced.
+The engine is language-neutral. Every text it says on its own can be replaced, and one bot can serve several languages:
+see the [delivery-reschedule](https://github.com/gallas-ai/flow-engine/tree/main/examples/delivery-reschedule) example.
 
 ## Installation
 
@@ -123,6 +124,7 @@ from a clone of the repository with `npm run example -- <example> [yaml|code]`.
 | Example | What it shows |
 |---|---|
 | [verification](https://github.com/gallas-ai/flow-engine/tree/main/examples/verification) | Checking an answer against a CRM with `verify`, limited retries with `max_attempts`, giving up with `on_exhausted` |
+| [delivery-reschedule](https://github.com/gallas-ai/flow-engine/tree/main/examples/delivery-reschedule) | One flow in English, Czech and Spanish: `responses` per language, translated `messages`, one `Nlu` per language, translated choice-option labels |
 
 ## Documentation
 

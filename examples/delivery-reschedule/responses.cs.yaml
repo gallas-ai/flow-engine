@@ -1,0 +1,5 @@
+responses:
+  utter_ask_order_number: Jaké je číslo vaší objednávky?
+  utter_ask_delivery_day: Který den vám ji máme doručit?
+  utter_ask_confirmed: Mám přesunout doručení objednávky {order_number}?
+  utter_delivery_kept: Dobře, doručení zůstává beze změny.

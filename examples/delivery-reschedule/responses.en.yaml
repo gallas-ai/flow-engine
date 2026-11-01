@@ -1,0 +1,5 @@
+responses:
+  utter_ask_order_number: What is your order number?
+  utter_ask_delivery_day: Which day should we deliver it?
+  utter_ask_confirmed: Shall I move the delivery of order {order_number}?
+  utter_delivery_kept: OK, the delivery stays as it was.
