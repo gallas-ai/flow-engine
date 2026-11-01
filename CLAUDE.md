@@ -91,7 +91,11 @@ shared `keywordNlu` from `examples/shared/nlu.ts`), `main.ts` and, if needed, `a
 `main.ts` plays the customer's lines with `yaml`, `code` or both variants (`npm run example -- <example> [yaml|code]`).
 `src` must stay runnable by Node's type stripping, hence `erasableSyntaxOnly`.
 
-`test/examples-layout.test.ts` enforces this. For every example it checks that the files exist, that the main README
+How to run the example is the most important information in its README: the first section, right after the title and
+the one-line intro, is `## Run it` with the `npm run example -- <example>` command. Never move it further down.
+
+`test/examples-layout.test.ts` enforces this. For every example it checks that the files exist, that the README starts
+with the `## Run it` section, that the main README
 links to it, and that `main.ts` prints exactly the ` ```transcript ` blocks of its README in both variants. `← …`
 notes are ignored, so put explanations there.
 

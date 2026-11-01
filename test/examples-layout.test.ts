@@ -39,6 +39,14 @@ describe.each(examples)("examples/%s", (example) => {
     }
   });
 
+  it("shows how to run it first, in a `## Run it` section right after the intro", () => {
+    const readme = read(`examples/${example}/README.md`);
+    const firstSection = readme.match(/^## .*$/m)?.[0];
+    expect(firstSection).toBe("## Run it");
+    const runSection = readme.split(/^## /m)[1]!;
+    expect(runSection).toContain(`npm run example -- ${example}`);
+  });
+
   it("is linked from the main README", () => {
     expect(read("README.md")).toContain(`https://github.com/gallas-ai/flow-engine/tree/main/examples/${example}`);
   });

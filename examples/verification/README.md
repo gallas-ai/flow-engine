@@ -2,6 +2,19 @@
 
 The bot asks for an e-mail address, verifies it in the CRM, and ends the flow when that fails twice.
 
+## Run it
+
+From the repository root:
+
+```bash
+npm run example -- verification        # both versions
+npm run example -- verification yaml   # or: code
+```
+
+On Node 22.18 or newer, `node examples/verification/main.ts yaml` works too.
+
+## What it does
+
 ```transcript
 customer: I want to verify myself
 bot:      What is your e-mail address?
@@ -22,15 +35,6 @@ The example comes in two versions that behave the same:
 | [actions.ts](actions.ts) | The e-mail check both versions use, and the registry `flows.yaml` refers to by name |
 | [nlu.ts](nlu.ts) | A fake keyword NLU, so the example runs without an LLM |
 | [main.ts](main.ts) | Plays the conversation above |
-
-Run it from the repository root:
-
-```bash
-npm run example -- verification        # both versions
-npm run example -- verification yaml   # or: code
-```
-
-On Node 22.18 or newer, `node examples/verification/main.ts yaml` works too.
 
 All of it is one `collect` step with three keys:
 
