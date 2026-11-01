@@ -83,6 +83,30 @@ Semantics that are easy to break:
 - `test/examples.test.ts` runs each scenario from `examples/verification/` against both the YAML version and the
   code version of the same flow (`describe.each`). The two versions must behave the same.
 
+## Examples
+
+Each directory in `examples/` (except `shared/`) is one use case, named after it (`verification`), never after the
+feature it shows. It holds `README.md`, `flows.yaml`, `flows.ts` (the same flow in code), `nlu.ts` (keywords for the
+shared `keywordNlu` from `examples/shared/nlu.ts`), `main.ts` and, if needed, `actions.ts` with the `FlowRegistry`.
+`main.ts` plays the customer's lines with `yaml`, `code` or both variants (`npm run example -- <example> [yaml|code]`).
+`src` must stay runnable by Node's type stripping, hence `erasableSyntaxOnly`.
+
+`test/examples-layout.test.ts` enforces this. For every example it checks that the files exist, that the main README
+links to it, and that `main.ts` prints exactly the ` ```transcript ` blocks of its README in both variants. `← …`
+notes are ignored, so put explanations there.
+
+Every change to the public API or the YAML syntax ends with this decision, made before you report the work done:
+
+- **New example**: a new capability a user would look for by name, e.g. a new step kind or new collect-step
+  behaviour like `verify` + `max_attempts`.
+- **Extend an existing example**: a new option of a capability an example already shows.
+- **No example**: bug fixes, refactoring, message texts, error messages, internal changes.
+- **Ask the user**: anything in between, especially new engine options and changes to the `Nlu` interface, and any
+  feature that can't be expressed in YAML. Every example has both variants.
+
+A new or changed example updates the `## Examples` table in the main README (absolute GitHub URL, a "what it shows"
+column naming the features) and its README's ` ```transcript ` block.
+
 ## Docs
 
 User-facing documentation is `README.md` plus `docs/flows-in-code.md`, `docs/yaml.md` (including the "Differences from

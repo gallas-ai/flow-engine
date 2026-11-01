@@ -1,33 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
-import { compileFlows, FlowEngine, type Flow, type Nlu, type Slots } from "../src/index.ts";
+import { compileFlows, FlowEngine, type Flow } from "../src/index.ts";
 import { registry } from "../examples/verification/actions.ts";
 import { verifyCustomer } from "../examples/verification/flows.ts";
+import { nlu } from "../examples/verification/nlu.ts";
 import source from "../examples/verification/flows.yaml?raw";
-
-// a fake NLU: the answer to the question is the e-mail, in an opening message only something with an @ is
-const nlu: Nlu = {
-  async route(text) {
-    return /verify/i.test(text) ? "verify_customer" : null;
-  },
-  async classifyTurn() {
-    return "answer";
-  },
-  async extract(_flow, wanted, _slots, text, question) {
-    const values: Slots = {};
-    if (wanted.some(({ name }) => name === "email")) {
-      const email = question ? text.trim() : /\S+@\S+/.exec(text)?.[0];
-      if (email) values.email = email;
-    }
-    return { values, notAmongOptions: [] };
-  },
-  async choose() {
-    return null;
-  },
-  async answer(text) {
-    return text;
-  },
-};
 
 function createEngine(flows: Record<string, Flow>) {
   const said: string[] = [];

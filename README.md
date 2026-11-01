@@ -115,6 +115,15 @@ const flows = compileFlows(parse(await readFile("flows.yaml", "utf8")), {
 
 YAML and code flows produce the same `Flow` objects and can be mixed.
 
+## Examples
+
+Each example is one use case, written both in YAML and in code, with a fake NLU so it runs without an LLM. Run one
+from a clone of the repository with `npm run example -- <example> [yaml|code]`.
+
+| Example | What it shows |
+|---|---|
+| [verification](https://github.com/gallas-ai/flow-engine/tree/main/examples/verification) | Checking an answer against a CRM with `verify`, limited retries with `max_attempts`, giving up with `on_exhausted` |
+
 ## Documentation
 
 - [Flows in code](https://github.com/gallas-ai/flow-engine/blob/main/docs/flows-in-code.md) – slots, steps, actions
@@ -127,6 +136,7 @@ YAML and code flows produce the same `Flow` objects and can be mixed.
 npm install
 npm test              # vitest
 npm run typecheck
+npm run example -- verification # plays an example
 npm run build         # compiles src/ to dist/
 npm run check:package # publint + attw on the packed package
 ```

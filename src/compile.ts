@@ -86,14 +86,25 @@ class FlowCompiler {
   private readonly ids = new Set<string>();
   private carry: string[] = [];
   private generated = 0;
+  private readonly name: string;
+  private readonly path: string;
+  private readonly responses: Record<string, string>;
+  private readonly declarations: Record<string, SlotDeclaration>;
+  private readonly registry: FlowRegistry;
 
   constructor(
-    private readonly name: string,
-    private readonly path: string,
-    private readonly responses: Record<string, string>,
-    private readonly declarations: Record<string, SlotDeclaration>,
-    private readonly registry: FlowRegistry,
-  ) {}
+    name: string,
+    path: string,
+    responses: Record<string, string>,
+    declarations: Record<string, SlotDeclaration>,
+    registry: FlowRegistry,
+  ) {
+    this.name = name;
+    this.path = path;
+    this.responses = responses;
+    this.declarations = declarations;
+    this.registry = registry;
+  }
 
   compile(value: unknown): Flow {
     const data = object(value, this.path, ["name", "description", "persisted_slots", "steps"]);
