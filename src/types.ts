@@ -40,7 +40,16 @@ export type ActionResult = { say?: string | string[]; setSlots?: Record<string, 
 export type Action = (slots: Slots) => ActionResult | void | Promise<ActionResult | void>;
 
 export type Step = { id?: string } & (
-  | { kind: "collect"; slot: string }
+  | {
+      kind: "collect";
+      slot: string;
+      /** Checks the collected value; an action that clears the slot turns the value down, and the question is asked again. */
+      verify?: Action;
+      /** How many turned-down values (by `verify` or `validate`) the step accepts before it gives up. */
+      maxAttempts?: number;
+      /** Where the flow goes after `maxAttempts` turned-down values: a step id, or END (the default). */
+      onExhausted?: string;
+    }
   | { kind: "say"; text: (slots: Slots) => string }
   /** Jumps to the step with id `to` (or END) when `when` holds; without `when` it always jumps. */
   | { kind: "goto"; to: string; when?: (slots: Slots) => boolean }

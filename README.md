@@ -11,6 +11,8 @@ What it handles for you:
 
 - **Prefill**: what the customer mentions in the first message is used at once, and those questions are skipped.
 - **Validation**: business rules live in code, never in a prompt, and apply to prefilled values too.
+- **Verification with retries**: an action checks the answer (e.g. against a CRM); after a set number of failed attempts
+  the flow gives up.
 - **Actions**: your code (sync or async) looks things up, says something and stores results the next steps decide on.
 - **Options**: choice questions offer only valid values. A single option is picked without asking.
 - **Turn types**: an answer, a question about the step, a digression, a task switch, or a cancel.

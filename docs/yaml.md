@@ -122,6 +122,21 @@ A `collect` step can also have:
         utter: utter_address_needs_number
   ```
 - `utter` – a different question than the default `utter_ask_<slot>`.
+- `verify` – an action that checks the value as soon as the slot is filled, also from the first message. An action that
+  clears the slot (`email: null`) turns the value down, and the question is asked again.
+- `max_attempts` – how many turned-down values the step accepts: those cleared by `verify` and answers rejected by
+  `rejections`. Answers the engine didn't understand don't count.
+- `on_exhausted` – where the flow goes after `max_attempts` turned-down values: a step id or a list of steps, like `then`.
+  Without it the flow ends.
+  ```yaml
+  - collect: email
+    verify: action_verify_email # code: looks the customer up, or clears email
+    max_attempts: 2
+    on_exhausted:
+      - action: utter_verification_failed
+        next: END
+  ```
+  The whole scenario is in [examples/verification](../examples/verification/reamde.md).
 
 ## Where the flow goes next
 

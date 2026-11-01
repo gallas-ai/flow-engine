@@ -1,0 +1,23 @@
+# Verifying a customer by e-mail: at most two attempts, then the flow ends.
+flows:
+  verify_customer:
+    name: Customer verification
+    description: The customer needs to verify themselves by e-mail, e.g. before we tell them the status of an order.
+    steps:
+      - collect: email
+        description: the customer's e-mail address
+        rejections: # a malformed address counts as an attempt, just like an unknown one
+          - if: not (slots.email matches "@")
+            utter: utter_email_invalid
+        verify: action_verify_email # code: finds the customer in the CRM, or clears email
+        max_attempts: 2
+        on_exhausted:
+          - action: utter_verification_failed
+            next: END
+      - action: utter_verified
+
+responses:
+  utter_ask_email: What is your e-mail address?
+  utter_email_invalid: That doesn't look like an e-mail address.
+  utter_verification_failed: Sorry, I couldn't verify you. Please contact our support.
+  utter_verified: Thank you, {customer_name}, you are verified.

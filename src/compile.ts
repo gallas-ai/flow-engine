@@ -21,7 +21,7 @@ type SlotDeclaration = Pick<SlotDefinition, "type" | "options" | "help" | "notAv
 const SLOT_TYPES = ["text", "bool", "number", "choice"] as const;
 const STEP_KINDS = ["collect", "action", "set_slots", "link", "noop"] as const;
 const STEP_KEYS: Record<(typeof STEP_KINDS)[number], string[]> = {
-  collect: ["collect", "description", "ask_before_filling", "rejections", "utter"],
+  collect: ["collect", "description", "ask_before_filling", "rejections", "utter", "verify", "max_attempts", "on_exhausted"],
   action: ["action"],
   set_slots: ["set_slots"],
   link: ["link"],
@@ -136,13 +136,29 @@ class FlowCompiler {
     const first = this.steps.length;
 
     switch (kind) {
-      case "collect":
-        this.steps.push({ kind: "collect", slot: this.collect(data, path) });
+      case "collect": {
+        const step: Step = { kind: "collect", slot: this.collect(data, path) };
+        if (data.verify !== undefined) {
+          const name = string(data.verify, `${path}.verify`);
+          if (name.startsWith("utter_")) fail(`${path}.verify`, "must be an action, not a response");
+          step.verify = this.action(name, `${path}.verify`);
+        }
+        if (data.max_attempts !== undefined) {
+          if (!Number.isInteger(data.max_attempts) || (data.max_attempts as number) < 1) fail(`${path}.max_attempts`, "must be a whole number of at least 1");
+          step.maxAttempts = data.max_attempts as number;
+        }
+        if (data.on_exhausted !== undefined) {
+          if (step.maxAttempts === undefined) fail(`${path}.on_exhausted`, "needs max_attempts");
+          step.onExhausted = this.branch(data.on_exhausted, `${path}.on_exhausted`);
+          this.targets.push({ to: step.onExhausted, path: `${path}.on_exhausted` });
+        }
+        this.steps.push(step);
         break;
+      }
       case "action": {
         const name = string(data.action, `${path}.action`);
         if (name.startsWith("utter_")) this.steps.push({ kind: "say", text: this.response(name, `${path}.action`) });
-        else this.steps.push({ kind: "action", run: this.registry.actions?.[name] ?? fail(`${path}.action`, `unknown action "${name}" – add it to registry.actions`) });
+        else this.steps.push({ kind: "action", run: this.action(name, `${path}.action`) });
         break;
       }
       case "set_slots": {
@@ -245,6 +261,10 @@ class FlowCompiler {
     } catch (error) {
       return fail(path, (error as Error).message);
     }
+  }
+
+  private action(name: string, path: string): Action {
+    return this.registry.actions?.[name] ?? fail(path, `unknown action "${name}" – add it to registry.actions`);
   }
 
   private response(name: string, path: string): (slots: Slots) => string {

@@ -9,6 +9,12 @@ for task-oriented conversations. Core principle: **the LLM understands, the code
 questions through the injected `Nlu` interface; what happens next is decided deterministically by walking flow steps.
 The engine never imports LLM code.
 
+## Language
+
+Write everything in this repository in English: code, identifiers, comments, docs, examples, test fixtures, test data,
+flow names, bot texts and commit messages. This applies even when the user writes to you in another language. When you
+touch existing non-English content, translate it to English.
+
 ## Commands
 
 ```bash
@@ -76,7 +82,6 @@ Semantics that are easy to break:
   `test/fixtures/eshop.yaml`.
 - `test/examples.test.ts` runs each scenario from `examples/verification/` against both the YAML version and the
   code version of the same flow (`describe.each`). The two versions must behave the same.
-- Example and fixture content (texts, flow names) is in Czech. Library code, comments and default messages are English.
 
 ## Docs
 

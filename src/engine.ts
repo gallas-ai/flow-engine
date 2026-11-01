@@ -5,7 +5,7 @@
 // it gets an `Nlu` implementation injected, so it runs just as well with a fake keyword NLU in tests.
 import { defaultMessages } from "./messages.ts";
 import { END } from "./types.ts";
-import type { Flow, FlowEngineEvent, FlowSummary, FrameSnapshot, Messages, Nlu, SlotDefinition, SlotValue, Slots } from "./types.ts";
+import type { Action, Flow, FlowEngineEvent, FlowSummary, FrameSnapshot, Messages, Nlu, SlotDefinition, SlotValue, Slots } from "./types.ts";
 
 type Frame = {
   flow: Flow;
@@ -13,6 +13,8 @@ type Frame = {
   slots: Slots;
   waitingFor?: string;
   attempts: number;
+  /** Turned-down values per collect step (by step index) – for `maxAttempts`. */
+  failures: Map<number, number>;
   noAutoSelect: Set<string>;
   /** Slots filled as the answer to their own question – a prefill: false slot is taken only from such an answer. */
   answered: Set<string>;
@@ -96,7 +98,7 @@ export class FlowEngine {
   async start(name: string, text?: string, carried: Slots = {}): Promise<void> {
     const flow = this.flows[name];
     if (!flow) throw new Error(`Unknown flow ${name}`);
-    const frame: Frame = { flow, step: 0, slots: { ...carried }, attempts: 0, noAutoSelect: new Set(), answered: new Set() };
+    const frame: Frame = { flow, step: 0, slots: { ...carried }, attempts: 0, failures: new Map(), noAutoSelect: new Set(), answered: new Set() };
     this.stack.push(frame);
     this.emit({ type: "flowStarted", flow: flow.name, title: flow.title, carried: Object.keys(carried) });
     if (text) await this.fill(frame, text, true); // ← PREFILL from the opening message
@@ -146,6 +148,7 @@ export class FlowEngine {
         this.output(error);
         reported = true;
         frame.noAutoSelect.add(definition.name);
+        if (definition === waiting && !prefill) countFailure(frame); // an answer to the question we asked counts as an attempt
         continue;
       }
       frame.slots[definition.name] = value;
@@ -180,8 +183,18 @@ export class FlowEngine {
           const definition = this.slotDefinition(frame.flow, step.slot);
           const answered = frame.answered.delete(step.slot);
           if (step.slot in frame.slots) {
-            if (definition.prefill !== false || answered) { frame.step++; continue; } // ← prefilled = step skipped
-            delete frame.slots[step.slot]; // carried, set by an action or answered on an earlier pass → ask again
+            if (definition.prefill !== false || answered) {
+              if (!step.verify || (await this.verify(frame, step.verify, step.slot))) { // ← prefilled = step skipped
+                frame.failures.delete(frame.step);
+                frame.step++;
+                continue;
+              }
+            } else delete frame.slots[step.slot]; // carried, set by an action or answered on an earlier pass → ask again
+          }
+          if (step.maxAttempts !== undefined && (frame.failures.get(frame.step) ?? 0) >= step.maxAttempts) {
+            frame.failures.delete(frame.step);
+            frame.step = this.indexOf(frame.flow, step.onExhausted ?? END);
+            continue;
           }
           const options = definition.options?.(frame.slots);
           if (options && options.length === 0) {
@@ -192,8 +205,7 @@ export class FlowEngine {
           if (options?.length === 1 && !frame.noAutoSelect.has(definition.name) && definition.prefill !== false) {
             frame.slots[definition.name] = options[0]!.value; // only one option → don't ask
             this.output(this.messages.autoSelected(options[0]!));
-            frame.step++;
-            continue;
+            continue; // the same step again, so that `verify` checks the value
           }
           frame.waitingFor = definition.name;
           const question = definition.question(frame.slots) + (options ? this.messages.formatOptions(options) : "");
@@ -204,13 +216,10 @@ export class FlowEngine {
           this.output(step.text(frame.slots));
           frame.step++;
           continue;
-        case "action": {
-          const result = await step.run({ ...frame.slots });
-          if (result?.setSlots) setSlots(frame.slots, result.setSlots);
-          for (const text of [result?.say ?? []].flat()) this.output(text);
+        case "action":
+          await this.run(frame, step.run);
           frame.step++;
           continue;
-        }
         case "set":
           setSlots(frame.slots, step.values);
           frame.step++;
@@ -227,6 +236,21 @@ export class FlowEngine {
         }
       }
     }
+  }
+
+  private async run(frame: Frame, action: Action): Promise<void> {
+    const result = await action({ ...frame.slots });
+    if (result?.setSlots) setSlots(frame.slots, result.setSlots);
+    for (const text of [result?.say ?? []].flat()) this.output(text);
+  }
+
+  /** Runs a collect step's `verify`; the value is turned down when the action cleared the slot. */
+  private async verify(frame: Frame, action: Action, slot: string): Promise<boolean> {
+    await this.run(frame, action);
+    if (slot in frame.slots) return true;
+    countFailure(frame);
+    frame.noAutoSelect.add(slot); // a single option that failed must not be picked again without asking
+    return false;
   }
 
   private slotDefinition(flow: Flow, name: string): SlotDefinition {
@@ -263,6 +287,11 @@ export class FlowEngine {
   }
 }
 
+/** One more turned-down value for the collect step the frame stands on. */
+function countFailure(frame: Frame): void {
+  frame.failures.set(frame.step, (frame.failures.get(frame.step) ?? 0) + 1);
+}
+
 function setSlots(slots: Slots, values: Record<string, SlotValue | null>): void {
   for (const [name, value] of Object.entries(values)) {
     if (value === null) delete slots[name];
@@ -284,7 +313,12 @@ function validateFlows(flows: Record<string, Flow>): void {
       if (ids.indexOf(id) !== ids.lastIndexOf(id)) fail(`step id ${id} is used twice`);
     }
     for (const step of flow.steps) {
-      if (step.kind === "collect" && !flow.slots.some((slot) => slot.name === step.slot)) fail(`collects unknown slot ${step.slot}`);
+      if (step.kind === "collect") {
+        if (!flow.slots.some((slot) => slot.name === step.slot)) fail(`collects unknown slot ${step.slot}`);
+        if (step.maxAttempts !== undefined && !(Number.isInteger(step.maxAttempts) && step.maxAttempts >= 1)) fail(`maxAttempts of ${step.slot} must be a whole number of at least 1`);
+        if (step.onExhausted !== undefined && step.maxAttempts === undefined) fail(`onExhausted of ${step.slot} needs maxAttempts`);
+        if (step.onExhausted !== undefined && step.onExhausted !== END && !ids.includes(step.onExhausted)) fail(`onExhausted to unknown step ${step.onExhausted}`);
+      }
       if (step.kind === "goto" && step.to !== END && !ids.includes(step.to)) fail(`goto to unknown step ${step.to}`);
       if (step.kind === "link" && !flows[step.flow]) fail(`links to unknown flow ${step.flow}`);
     }
