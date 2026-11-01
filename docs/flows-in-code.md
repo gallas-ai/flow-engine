@@ -73,15 +73,77 @@ await engine.handle("I want to return the mug");
 | Step | What it does |
 |---|---|
 | `{ kind: "collect", slot }` | Asks for the slot. Skipped when the slot is already known, e.g. from the first message |
-| `{ kind: "collect", slot, verify, maxAttempts, onExhausted }` | `verify` is an action run as soon as the slot is filled; when it clears the slot, the value is turned down and the question asked again. After `maxAttempts` turned-down values (by `verify` or `validate`) the flow jumps to `onExhausted` (a step id, END by default). See [examples/verification](../examples/verification/reamde.md) |
+| `{ kind: "collect", slot, verify, maxAttempts, onExhausted }` | `verify` is an action run as soon as the slot is filled; when it clears the slot, the value is turned down and the question asked again. After `maxAttempts` turned-down values (by `verify` or `validate`) the flow jumps to `onExhausted` (a step id, END by default). See [examples/verification](../examples/verification/README.md) |
 | `{ kind: "say", text }` | Says `text(slots)` |
 | `{ kind: "action", run }` | Runs your code (sync or async) and waits for it. It returns `{ say?, setSlots? }`: what to say and which slots to store. `null` in `setSlots` clears a slot |
 | `{ kind: "set", values }` | Stores fixed values in slots; `null` clears one |
 | `{ kind: "goto", to, when }` | Jumps to the step with that `id`, or to `END`, when `when(slots)` holds. Without `when` it always jumps |
 | `{ kind: "link", flow, carry, message? }` | Replaces the current flow with another one and takes the slots listed in `carry` along |
+| `{ kind: "call", flow }` | Runs another flow with this flow's slots, then continues with the next step. See [Calling a flow](#calling-a-flow) |
 | `{ kind: "end" }` | Ends the flow. A flow parked below it resumes |
 
 Any step can have an `id` for `goto` to jump to. The flow also ends after its last step.
 
 When the engine is created, it checks the flows and throws on a broken reference: a step that collects an unknown slot,
-a `goto` to an unknown step, or a `link` to an unknown flow.
+a `goto` to an unknown step, a `link` or `call` to an unknown flow, or a `call` that can lead back to its own flow.
+
+## Calling a flow
+
+A `call` step runs another flow in the middle of this one. When the called flow ends, this flow continues with the
+step after the `call`. Use it for steps that several flows share, such as verifying the customer before anything else:
+
+```ts
+const verifyPatient: Flow = {
+  name: "verify_patient",
+  title: "Patient verification",
+  routable: false, // only a call starts it, never the customer's message
+  slots: [{ name: "phone", type: "text", description: "the patient's phone number", question: () => "What is your phone number?" }],
+  steps: [
+    { kind: "collect", slot: "phone", verify: verifyPhone, maxAttempts: 2 }, // verifyPhone sets patient_id
+  ],
+};
+
+const bookAppointment: Flow = {
+  name: "book_appointment",
+  title: "Book appointment",
+  slots: [{ name: "day", type: "text", description: "the day of the appointment", question: () => "Which day would you like?" }],
+  steps: [
+    { kind: "call", flow: "verify_patient" },
+    { kind: "goto", to: "END", when: (slots) => !("patient_id" in slots) }, // check how the call went
+    { kind: "collect", slot: "day" },
+    { kind: "action", run: bookDay },
+  ],
+};
+```
+
+How a call behaves:
+
+- **Slots are shared.** The called flow starts with all of the caller's slots. When it ends, all of its slots go back to
+  the caller: what it collected, what its actions set, and what it cleared. Slots with the same name are the same
+  slot, so give the slots of a flow you call from several places names that don't mean something else in a caller.
+- **The caller checks the result.** An `END` in the called flow, including `onExhausted` and a choice slot without
+  options, ends only the called flow, and the caller continues. The called flow reports how it went through its slots
+  (`patient_id` is set or not), and the caller checks them right after the `call`.
+- **Prefill.** When the call runs in the same turn as a customer's message, the called flow takes values from that
+  message, like a flow the message started. "Book me in for Friday, my number is 555-0100" fills both `day` and
+  `phone`. A slot with `prefill: false` is still asked, even when the caller already holds it.
+- **No "Back to…" line.** When the called flow ends, the caller goes on with its next question as if it were its own.
+- **Cancel and task switch act on the whole task.** To the customer, the called flow is part of the task they started.
+  A cancel inside the called flow cancels its callers too, and `messages.flowCancelled` names the flow the customer
+  started ("Book appointment", not "Patient verification"). A task switch parks the called flow together with its
+  callers; `messages.flowParked` and `messages.resume` name the started flow, and afterwards the conversation resumes
+  at the called flow's question. A task switch to a flow that is already running in the chain ("I want to book an
+  appointment" during the booking's verification) doesn't start it again: the bot answers the message and asks the
+  waiting question again.
+- **Nesting.** A called flow can call another flow. A `link` in a called flow replaces only the called flow, and the
+  caller continues when the linked flow ends. A flow can't call itself, directly or through other calls and links: the
+  engine throws when it is created.
+
+`routable: false` hides a flow from `Nlu.route`, so a customer's message never starts it, only a `call`, a `link` or
+`engine.start` from your code. If the NLU returns the flow's name anyway, the engine treats it as no flow and just
+answers the message. Use it for flows that make sense only inside another flow, like the verification above.
+
+`onEvent` gets `flowStarted` with `called: true` for a called flow, and `carried` lists the slots it started with.
+`engine.snapshot()` marks called frames with `called: true`; the frame below a called frame is its caller.
+
+[examples/appointments](../examples/appointments/README.md) shows two flows calling the same verification.

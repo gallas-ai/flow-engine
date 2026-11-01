@@ -14,7 +14,7 @@ interface Nlu {
 
 | Method | Question | Returns |
 |---|---|---|
-| `route` | Which flow does this message start? `flows` lists each flow's `name`, `title` and `description` | The flow's `name`, or `null` to just answer the message |
+| `route` | Which flow does this message start? `flows` lists each flow's `name`, `title` and `description`, except flows with `routable: false` (YAML `if: False`) | The flow's `name`, or `null` to just answer the message |
 | `classifyTurn` | While the bot waits for an answer to `question`: what is this message? | `answer`, `step_question` ("why do you need it?"), `digression` (an unrelated question), `task_switch` (wants something else) or `cancel` |
 | `extract` | Which of the `wanted` slots does the message contain? | `{ values, notAmongOptions }`: typed values (`true` / `false` for bool slots, numbers for number slots), and the choice slots for which the customer named something that isn't offered |
 | `choose` | Which of the offered `options` did the customer pick ("the second one", "the cheaper one")? | The option's `value`, or `null` |
@@ -227,7 +227,7 @@ const engine = new FlowEngine({
 });
 
 await engine.handle(text); // one customer message
-engine.snapshot(); // the flow stack as data: flow, step, the question it waits for, slots
+engine.snapshot(); // the flow stack as data: flow, step, the question it waits for, slots, called by the frame below
 ```
 
 The engine's own texts (not understood, flow parked, flow cancelled, back to…, the option list format) are in

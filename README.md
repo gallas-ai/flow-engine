@@ -18,6 +18,7 @@ What it handles for you:
 - **Turn types**: an answer, a question about the step, a digression, a task switch, or a cancel.
 - **Flow stack**: a task switch parks the current flow and resumes it afterwards.
 - **Links**: one flow can hand over to another and carry values along.
+- **Calls**: one flow can run another, e.g. a verification several flows share, and continue when it ends.
 - **YAML**: flows can be written as YAML that reads like the support team's process documentation.
 
 The engine is language-neutral. Every text it says on its own can be replaced, and one bot can serve several languages:
@@ -124,6 +125,7 @@ from a clone of the repository with `npm run example -- <example> [yaml|code]`.
 | Example | What it shows |
 |---|---|
 | [verification](https://github.com/gallas-ai/flow-engine/tree/main/examples/verification) | Checking an answer against a CRM with `verify`, limited retries with `max_attempts`, giving up with `on_exhausted` |
+| [appointments](https://github.com/gallas-ai/flow-engine/tree/main/examples/appointments) | Two flows sharing one verification with `call`, a flow hidden from routing with `if: False`, checking the slots a call hands back, cancelling a called flow |
 | [delivery-reschedule](https://github.com/gallas-ai/flow-engine/tree/main/examples/delivery-reschedule) | One flow in English, Czech and Spanish: `responses` per language, translated `messages`, one `Nlu` per language, translated choice-option labels |
 
 ## Documentation

@@ -1,0 +1,53 @@
+# Booking and cancelling an appointment: both flows start by calling the same patient verification.
+flows:
+  verify_patient:
+    name: Patient verification
+    description: Finds the patient by phone number before anything is done with their appointments.
+    if: False # hidden from routing: only a `call` starts it
+    steps:
+      - action: action_recall_patient # code: sets patient_id when this conversation verified the patient already
+        next:
+          - if: slots.patient_id is not null
+            then: END
+          - else: ask_phone
+      - id: ask_phone
+        collect: phone
+        description: the patient's phone number
+        verify: action_verify_phone # code: finds the patient, or clears phone
+        max_attempts: 2
+        on_exhausted:
+          - action: utter_verification_failed
+            next: END
+      - action: utter_verified
+
+  book_appointment:
+    name: Book appointment
+    description: The patient wants to book an appointment.
+    steps:
+      - call: verify_patient # comes back with the verification's slots: patient_id, patient_name
+        next:
+          - if: slots.patient_id is null # verification failed – END in the called flow ends only the called flow
+            then: END
+          - else: ask_day
+      - id: ask_day
+        collect: day
+        description: the day of the appointment, Monday to Friday
+      - action: action_book_appointment
+
+  cancel_appointment:
+    name: Cancel appointment
+    description: The patient wants to cancel an appointment they booked.
+    steps:
+      - call: verify_patient
+        next:
+          - if: slots.patient_id is null
+            then: END
+          - else: cancel
+      - id: cancel
+        action: action_cancel_appointment
+
+responses:
+  utter_ask_phone: What is your phone number?
+  utter_verified: Thank you, {patient_name}, you are verified.
+  utter_verification_failed: Sorry, I couldn't verify you. Please call the front desk.
+  utter_ask_day: Which day would you like?

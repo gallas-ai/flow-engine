@@ -43,7 +43,7 @@ tag against `package.json`, reruns the checks and publishes via npm trusted publ
 ## Architecture
 
 - `src/types.ts` – the public contract: `Flow`, `SlotDefinition`, `Step` (a discriminated union on `kind`: `collect`,
-  `say`, `goto`, `set`, `link`, `action`, `end`), `Nlu`, `Messages`, `FlowEngineEvent`, and the reserved step id `END`.
+  `say`, `goto`, `set`, `link`, `call`, `action`, `end`), `Nlu`, `Messages`, `FlowEngineEvent`, and the reserved step id `END`.
 - `src/engine.ts` – `FlowEngine`, the state machine. It keeps a **stack of frames** (one per active flow: step index,
   slots, the slot it is waiting for, attempt counters).
   - `handle(text)`: with nothing waiting, `nlu.route` picks a flow (or `nlu.answer` replies). While waiting on a question,
@@ -53,7 +53,9 @@ tag against `package.json`, reruns the checks and publishes via npm trusted publ
     The same path does prefill from the opening message.
   - `advance()` walks the steps until it must ask a question. A `collect` whose slot is already filled is skipped. A
     choice slot with exactly one option is auto-selected. When the frame's steps run out, it pops and the frame below
-    resumes with a `messages.resume` line. A `link` replaces the frame and carries the listed slots along.
+    resumes with a `messages.resume` line. A `link` replaces the frame and carries the listed slots along. A `call`
+    pushes a frame marked `called` with all the caller's slots; when it ends, its slots replace the caller's and the
+    caller continues without a resume line.
   - `validateFlows()` checks references (step ids, slots, linked flows) in the constructor, so broken flows fail at
     construction rather than mid-conversation.
 - `src/compile.ts` – `compileFlows(data, registry)`: compiles a subset of Rasa's YAML flow syntax into the same `Flow`
@@ -69,6 +71,9 @@ tag against `package.json`, reruns the checks and publishes via npm trusted publ
 Semantics that are easy to break:
 - `prefill: false` (YAML `ask_before_filling: true`) means the slot is taken only from an answer to its own question.
   A carried value, a value set by an action, or one answered on an earlier pass is asked again (used for consent).
+- A called frame and its callers form a **call chain** (see `GLOSSARY.md`): `cancel` removes the whole chain, a
+  `task_switch` parks it, and the messages name the flow the customer started. `routable: false` (YAML `if: False`)
+  hides a flow from `nlu.route`. Why called flows share slots: `docs/adr/0001-called-flows-share-slots.md`.
 - `verify` on a collect step is an action. It turns a value down by **clearing the slot** (`setSlots: { x: null }`).
   Turned-down values from `verify` or `validate` count toward `maxAttempts`, after which the flow jumps to `onExhausted`
   (default `END`).
@@ -80,8 +85,8 @@ Semantics that are easy to break:
   `output` callback and assert on the lines said per turn and on `engine.snapshot()`.
 - YAML sources are imported with Vite's `?raw` suffix (typed by `test/raw.d.ts`). The shop fixture is
   `test/fixtures/eshop.yaml`.
-- `test/examples.test.ts` runs each scenario from `examples/verification/` against both the YAML version and the
-  code version of the same flow (`describe.each`). The two versions must behave the same.
+- `test/examples.test.ts` runs scenarios from `examples/verification/` and `examples/appointments/` against both the
+  YAML version and the code version of the same flows (`describe.each`). The two versions must behave the same.
 
 ## Examples
 

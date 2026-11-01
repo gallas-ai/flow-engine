@@ -18,6 +18,8 @@ type Frame = {
   noAutoSelect: Set<string>;
   /** Slots filled as the answer to their own question – a prefill: false slot is taken only from such an answer. */
   answered: Set<string>;
+  /** Pushed by a `call` step: the frame below waits for it and gets its slots back. */
+  called: boolean;
 };
 
 export type FlowEngineOptions = {
@@ -42,7 +44,9 @@ export class FlowEngine {
   constructor(options: FlowEngineOptions) {
     validateFlows(options.flows);
     this.flows = options.flows;
-    this.summaries = Object.values(options.flows).map(({ name, title, description }) => ({ name, title, description }));
+    this.summaries = Object.values(options.flows)
+      .filter((flow) => flow.routable !== false)
+      .map(({ name, title, description }) => ({ name, title, description }));
     this.nlu = options.nlu;
     this.output = options.output;
     this.emit = options.onEvent ?? (() => {});
@@ -51,12 +55,25 @@ export class FlowEngine {
 
   private get top() { return this.stack.at(-1); }
 
+  /** The top frame and the frames that called it, down to the flow the customer started (first). */
+  private chain(): Frame[] {
+    let start = this.stack.length - 1;
+    while (this.stack[start]?.called) start--;
+    return this.stack.slice(start);
+  }
+
+  /** `Nlu.route`, limited to the flows it may pick: a flow hidden from routing counts as no flow. */
+  private async route(text: string): Promise<string | null> {
+    const flow = await this.nlu.route(text, this.summaries);
+    return flow !== null && this.flows[flow]?.routable === false ? null : flow;
+  }
+
   // ───────────────────────── entry point ─────────────────────────
 
   async handle(text: string): Promise<void> {
     const frame = this.top;
     if (!frame?.waitingFor) {
-      const flow = await this.nlu.route(text, this.summaries);
+      const flow = await this.route(text);
       this.emit({ type: "routed", flow });
       if (flow) return this.start(flow, text);
       return this.output(await this.nlu.answer(text));
@@ -72,37 +89,45 @@ export class FlowEngine {
         if (!filled.includes(slot.name) && !reported) {
           this.output(++frame.attempts >= 2 ? this.messages.stillNotUnderstood() : this.messages.notUnderstood());
         }
-        return this.advance(false);
+        return this.advance(false, text);
       }
       case "step_question":
       case "digression":
         await this.fill(frame, text, false); // mixed turn: "Brazil, and how long does a refund take?"
         this.output(await this.nlu.answer(text, turnType === "step_question" ? { question: slot.question(frame.slots), help: slot.help } : undefined));
-        return this.advance(true);
+        return this.advance(true, text);
       case "task_switch": {
-        const flow = await this.nlu.route(text, this.summaries);
-        if (flow && flow !== frame.flow.name) {
-          this.output(this.messages.flowParked(frame.flow.title));
+        const flow = await this.route(text);
+        const chain = this.chain();
+        if (flow && !chain.some((frame) => frame.flow.name === flow)) {
+          this.output(this.messages.flowParked(chain[0]!.flow.title)); // the whole call chain waits
           return this.start(flow, text);
         }
         this.output(await this.nlu.answer(text));
         return this.advance(true);
       }
-      case "cancel":
-        this.stack.pop();
-        this.output(this.messages.flowCancelled(frame.flow.title));
+      case "cancel": {
+        // cancelling a called flow (verification) cancels the task the customer started (booking)
+        const [started] = this.chain();
+        this.stack.splice(this.stack.indexOf(started!));
+        this.output(this.messages.flowCancelled(started!.flow.title));
         return this.advance(true);
+      }
     }
   }
 
   async start(name: string, text?: string, carried: Slots = {}): Promise<void> {
+    await this.push(name, carried, false, text);
+    return this.advance(false, text);
+  }
+
+  private async push(name: string, carried: Slots, called: boolean, text?: string): Promise<void> {
     const flow = this.flows[name];
     if (!flow) throw new Error(`Unknown flow ${name}`);
-    const frame: Frame = { flow, step: 0, slots: { ...carried }, attempts: 0, failures: new Map(), noAutoSelect: new Set(), answered: new Set() };
+    const frame: Frame = { flow, step: 0, slots: { ...carried }, attempts: 0, failures: new Map(), noAutoSelect: new Set(), answered: new Set(), called };
     this.stack.push(frame);
-    this.emit({ type: "flowStarted", flow: flow.name, title: flow.title, carried: Object.keys(carried) });
+    this.emit({ type: "flowStarted", flow: flow.name, title: flow.title, carried: Object.keys(carried), called });
     if (text) await this.fill(frame, text, true); // ← PREFILL from the opening message
-    return this.advance(false);
   }
 
   // ───────────────────────── understanding → validated slots ─────────────────────────
@@ -163,8 +188,8 @@ export class FlowEngine {
 
   // ───────────────────────── the state machine ─────────────────────────
 
-  /** Walk the steps until we need input from the user (or run out of flows). */
-  private async advance(returning: boolean): Promise<void> {
+  /** Walk the steps until we need input from the user (or run out of flows); `text` = this turn's message, for prefill. */
+  private async advance(returning: boolean, text?: string): Promise<void> {
     while (true) {
       const frame = this.top;
       if (!frame) return;
@@ -174,7 +199,8 @@ export class FlowEngine {
       if (!step || step.kind === "end") {
         this.stack.pop();
         this.emit({ type: "flowEnded", flow: frame.flow.name, title: frame.flow.title });
-        returning = true; // whatever is below gets a "back to…" line
+        if (frame.called) this.top!.slots = frame.slots; // the caller goes on with the next step, no "back to…" line
+        else returning = true; // whatever is below gets a "back to…" line
         continue;
       }
 
@@ -209,7 +235,7 @@ export class FlowEngine {
           }
           frame.waitingFor = definition.name;
           const question = definition.question(frame.slots) + (options ? this.messages.formatOptions(options) : "");
-          this.output(returning ? this.messages.resume(frame.flow.title, question) : question);
+          this.output(returning ? this.messages.resume(this.chain()[0]!.flow.title, question) : question);
           return;
         }
         case "say":
@@ -232,8 +258,14 @@ export class FlowEngine {
           this.stack.pop();
           if (step.message) this.output(step.message);
           const carried = Object.fromEntries(step.carry.filter((name) => name in frame.slots).map((name) => [name, frame.slots[name]!]));
-          return this.start(step.flow, undefined, carried);
+          await this.push(step.flow, carried, frame.called); // linked from a called flow = still called
+          returning = false;
+          continue;
         }
+        case "call":
+          frame.step++; // where the caller goes on when the called flow ends
+          await this.push(step.flow, frame.slots, true, text);
+          continue;
       }
     }
   }
@@ -283,6 +315,7 @@ export class FlowEngine {
       step: frame.step,
       waitingFor: frame.waitingFor ?? null,
       slots: { ...frame.slots },
+      called: frame.called,
     }));
   }
 }
@@ -321,6 +354,22 @@ function validateFlows(flows: Record<string, Flow>): void {
       }
       if (step.kind === "goto" && step.to !== END && !ids.includes(step.to)) fail(`goto to unknown step ${step.to}`);
       if (step.kind === "link" && !flows[step.flow]) fail(`links to unknown flow ${step.flow}`);
+      if (step.kind === "call") {
+        if (!flows[step.flow]) fail(`calls unknown flow ${step.flow}`);
+        else if (reaches(flows, step.flow, key)) fail(`calls ${step.flow}, which leads back to ${key} – a call can't repeat endlessly`);
+      }
     }
   }
+}
+
+/** Can `from` get to `to` through calls and links? */
+function reaches(flows: Record<string, Flow>, from: string, to: string): boolean {
+  const seen = new Set<string>();
+  const visit = (name: string): boolean => {
+    if (name === to) return true;
+    if (seen.has(name)) return false;
+    seen.add(name);
+    return (flows[name]?.steps ?? []).some((step) => (step.kind === "call" || step.kind === "link") && visit(step.flow));
+  };
+  return visit(from);
 }

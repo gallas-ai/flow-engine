@@ -55,6 +55,11 @@ export type Step = { id?: string } & (
   | { kind: "goto"; to: string; when?: (slots: Slots) => boolean }
   | { kind: "set"; values: Record<string, SlotValue | null> }
   | { kind: "link"; flow: string; carry: string[]; message?: string }
+  /**
+   * Runs the flow and continues with the next step when it ends. The called flow starts with all of this flow's slots,
+   * and all of its slots (set or cleared) come back. Check them afterwards: an END in the called flow ends only that flow.
+   */
+  | { kind: "call"; flow: string }
   | { kind: "action"; run: Action }
   | { kind: "end" }
 );
@@ -64,6 +69,8 @@ export type Flow = {
   title: string;
   /** When this flow applies – passed to `Nlu.route` so the NLU can pick the flow. */
   description?: string;
+  /** false = hidden from `Nlu.route`: only a `call` or a `link` starts the flow (YAML: `if: False`). Defaults to true. */
+  routable?: boolean;
   slots: SlotDefinition[];
   steps: Step[];
 };
@@ -96,7 +103,10 @@ export interface Nlu {
   answer(text: string, step?: { question: string; help?: string }): Promise<string>;
 }
 
-/** Everything the engine says to the user on its own (not taken from a flow definition). */
+/**
+ * Everything the engine says to the user on its own (not taken from a flow definition).
+ * `flowTitle` is the title of the flow the customer started, never of a flow it called.
+ */
 export type Messages = {
   notUnderstood: () => string;
   /** After the second answer in a row the engine couldn't use. */
@@ -117,10 +127,11 @@ export type Messages = {
 export type FlowEngineEvent =
   | { type: "routed"; flow: string | null }
   | { type: "turnClassified"; turnType: TurnType }
-  | { type: "flowStarted"; flow: string; title: string; carried: string[] }
+  /** `called` = started by a `call` step (or linked to from a called flow); `carried` = the slots it started with. */
+  | { type: "flowStarted"; flow: string; title: string; carried: string[]; called: boolean }
   | { type: "flowEnded"; flow: string; title: string }
   | { type: "slotsPrefilled"; values: Slots; notAmongOptions: string[] }
   | { type: "slotsExtracted"; values: Slots; notAmongOptions: string[] };
 
-/** One frame of the flow stack, as data. */
-export type FrameSnapshot = { flow: string; title: string; step: number; waitingFor: string | null; slots: Slots };
+/** One frame of the flow stack, as data. `called` = the frame below called it. */
+export type FrameSnapshot = { flow: string; title: string; step: number; waitingFor: string | null; slots: Slots; called: boolean };
