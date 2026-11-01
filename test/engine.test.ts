@@ -92,11 +92,13 @@ const keywordNlu: Nlu = {
     routedWith = flows;
     if (has(text, "refund", "return")) return "refund";
     if (has(text, "address")) return "address";
+    if (has(text, "book")) return "booking";
+    if (has(text, "verify")) return "verify";
     return null;
   },
   async classifyTurn(_flowTitle, _question, text) {
     if (has(text, "cancel")) return "cancel";
-    if (has(text, "address")) return "task_switch";
+    if (has(text, "address", "book")) return "task_switch";
     if (text.trim().endsWith("?")) return has(text, "why") ? "step_question" : "digression";
     return "answer";
   },
@@ -116,6 +118,8 @@ const keywordNlu: Nlu = {
       if (definition.name === "confirm" && has(text, "ano")) values.confirm = "ano";
       if (definition.name === "defect" && has(text, "leaks")) values.defect = "leaks";
       if (definition.name === "address" && /\d/.test(text)) values.address = text;
+      if (definition.name === "birth_year" && /\b\d{4}\b/.test(text)) values.birth_year = /\b\d{4}\b/.exec(text)![0];
+      if (definition.name === "day" && has(text, "tuesday")) values.day = "tuesday";
     }
     return { values, notAmongOptions };
   },
@@ -269,9 +273,128 @@ describe("link", () => {
   it("replaces the flow and carries the listed slots over", async () => {
     const { engine, send, events } = createEngine();
     expect(await send("return the mug, it's broken")).toEqual(["Switching to a complaint.", "What is wrong with the mug?"]);
-    expect(events).toContainEqual({ type: "flowStarted", flow: "complaint", title: "Complaint", carried: ["item"] });
-    expect(engine.snapshot()).toEqual([{ flow: "complaint", title: "Complaint", step: 1, waitingFor: "defect", slots: { item: "mug" } }]);
+    expect(events).toContainEqual({ type: "flowStarted", flow: "complaint", title: "Complaint", carried: ["item"], called: false });
+    expect(engine.snapshot()).toEqual([{ flow: "complaint", title: "Complaint", step: 1, waitingFor: "defect", slots: { item: "mug" }, called: false }]);
     expect(await send("it leaks")).toEqual(["Complaint filed: mug – leaks."]);
+  });
+});
+
+describe("call", () => {
+  const verify: Flow = {
+    name: "verify",
+    title: "Patient verification",
+    routable: false,
+    slots: [{ name: "birth_year", type: "text", description: "year of birth", question: () => "What is your year of birth?" }],
+    steps: [
+      {
+        kind: "collect",
+        slot: "birth_year",
+        verify: (slots): ActionResult => (slots.birth_year === "1980" ? { setSlots: { patient_id: "P1" } } : { say: "Unknown patient.", setSlots: { birth_year: null } }),
+        maxAttempts: 2,
+        onExhausted: "failed",
+      },
+      { kind: "say", text: () => "Verified." },
+      { kind: "end" },
+      { id: "failed", kind: "say", text: () => "Verification failed." },
+    ],
+  };
+
+  const booking: Flow = {
+    name: "booking",
+    title: "Book appointment",
+    slots: [{ name: "day", type: "text", description: "day of the appointment", question: () => "Which day?" }],
+    steps: [
+      { kind: "call", flow: "verify" },
+      { kind: "goto", to: END, when: (slots) => !("patient_id" in slots) }, // an END in the called flow ends only that flow
+      { kind: "collect", slot: "day" },
+      { kind: "action", run: (slots) => ({ say: `Booked ${slots.day} for patient ${slots.patient_id}.` }) },
+    ],
+  };
+
+  const create = (flows: Record<string, Flow> = {}) => createEngine(undefined, { booking, verify, address, ...flows });
+
+  it("runs the called flow, then the caller goes on with its slots and without a resume line", async () => {
+    const { engine, send, events } = create();
+    expect(await send("book an appointment")).toEqual(["What is your year of birth?"]);
+    expect(events).toContainEqual({ type: "flowStarted", flow: "verify", title: "Patient verification", carried: [], called: true });
+    expect(engine.snapshot().map(({ flow, called }) => ({ flow, called }))).toEqual([
+      { flow: "booking", called: false },
+      { flow: "verify", called: true },
+    ]);
+    expect(await send("1980")).toEqual(["Verified.", "Which day?"]);
+    expect(engine.snapshot()).toEqual([
+      { flow: "booking", title: "Book appointment", step: 2, waitingFor: "day", slots: { birth_year: "1980", patient_id: "P1" }, called: false },
+    ]);
+    expect(await send("tuesday")).toEqual(["Booked tuesday for patient P1."]);
+  });
+
+  it("gives the called flow the caller's slots", async () => {
+    const { engine, send } = create();
+    await send("book tuesday");
+    expect(engine.snapshot()[1]!.slots).toEqual({ day: "tuesday" });
+    expect(await send("1980")).toEqual(["Verified.", "Booked tuesday for patient P1."]);
+  });
+
+  it("prefills the called flow from the message that led to the call", async () => {
+    const { engine, send } = create();
+    expect(await send("book tuesday, born 1980")).toEqual(["Verified.", "Booked tuesday for patient P1."]);
+    expect(engine.snapshot()).toEqual([]);
+  });
+
+  it("ends only the called flow on END, and the caller decides by its slots", async () => {
+    const { engine, send } = create();
+    await send("book an appointment");
+    expect(await send("1970")).toEqual(["Unknown patient.", "What is your year of birth?"]);
+    expect(await send("1971")).toEqual(["Unknown patient.", "Verification failed."]);
+    expect(engine.snapshot()).toEqual([]);
+  });
+
+  it("cancels the whole call chain and names the started flow", async () => {
+    const { engine, send } = create();
+    await send("book an appointment");
+    expect(await send("cancel it")).toEqual([`Understood, "Book appointment" is cancelled.`]);
+    expect(engine.snapshot()).toEqual([]);
+  });
+
+  it("parks the whole call chain on a task switch and resumes the called flow", async () => {
+    const { send } = create();
+    await send("book an appointment");
+    expect(await send("wait, change my address")).toEqual([`OK, I'll put "Book appointment" aside for now.`, "What is the new address?"]);
+    expect(await send("Main Street 8")).toEqual(["Address changed to Main Street 8.", "Back to Book appointment: What is your year of birth?"]);
+  });
+
+  it("ignores a task switch to a flow already in the call chain", async () => {
+    const { engine, send } = create();
+    await send("book an appointment");
+    expect(await send("I want to book an appointment")).toEqual([
+      "Answer: I want to book an appointment",
+      "Back to Book appointment: What is your year of birth?",
+    ]);
+    expect(engine.snapshot().map((frame) => frame.flow)).toEqual(["booking", "verify"]);
+  });
+
+  it("keeps a flow linked from a called flow in the call chain", async () => {
+    const gate: Flow = { name: "gate", title: "Gate", routable: false, slots: [], steps: [{ kind: "link", flow: "verify", carry: [] }] };
+    const { engine, send } = create({ gate, booking: { ...booking, steps: [{ kind: "call", flow: "gate" }, ...booking.steps.slice(1)] } });
+    await send("book an appointment");
+    expect(engine.snapshot().map(({ flow, called }) => ({ flow, called }))).toEqual([
+      { flow: "booking", called: false },
+      { flow: "verify", called: true },
+    ]);
+    expect(await send("1980")).toEqual(["Verified.", "Which day?"]);
+  });
+
+  it("hides a flow that isn't routable from the NLU", async () => {
+    const { send } = create();
+    expect(await send("verify me")).toEqual(["Answer: verify me"]); // the NLU picked the hidden flow anyway
+    expect(routedWith.map((flow) => flow.name)).toEqual(["booking", "address"]);
+  });
+
+  it("rejects unknown flows and calls that lead back when the engine is created", () => {
+    const calling = (steps: Flow["steps"]) => () => create({ verify: { ...verify, steps } });
+    expect(calling([{ kind: "call", flow: "nowhere" }])).toThrow("Flow verify: calls unknown flow nowhere");
+    expect(calling([{ kind: "call", flow: "booking" }])).toThrow("Flow booking: calls verify, which leads back to booking");
+    expect(calling([{ kind: "link", flow: "booking", carry: [] }])).toThrow("Flow booking: calls verify, which leads back to booking");
   });
 });
 

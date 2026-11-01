@@ -19,12 +19,13 @@ type Data = Record<string, unknown>;
 type SlotDeclaration = Pick<SlotDefinition, "type" | "options" | "help" | "notAvailable" | "noOptions">;
 
 const SLOT_TYPES = ["text", "bool", "number", "choice"] as const;
-const STEP_KINDS = ["collect", "action", "set_slots", "link", "noop"] as const;
+const STEP_KINDS = ["collect", "action", "set_slots", "link", "call", "noop"] as const;
 const STEP_KEYS: Record<(typeof STEP_KINDS)[number], string[]> = {
   collect: ["collect", "description", "ask_before_filling", "rejections", "utter", "verify", "max_attempts", "on_exhausted"],
   action: ["action"],
   set_slots: ["set_slots"],
   link: ["link"],
+  call: ["call"],
   noop: ["noop"],
 };
 
@@ -107,7 +108,9 @@ class FlowCompiler {
   }
 
   compile(value: unknown): Flow {
-    const data = object(value, this.path, ["name", "description", "persisted_slots", "steps"]);
+    const data = object(value, this.path, ["name", "description", "if", "persisted_slots", "steps"]);
+    // Rasa's flow guard; only `if: False` is supported: the flow can then be started only by a call or a link
+    if ("if" in data && data.if !== false) fail(`${this.path}.if`, "only `if: False` is supported (the flow is started only by call or link)");
     this.carry = array(data.persisted_slots ?? [], `${this.path}.persisted_slots`).map((slot, i) => string(slot, `${this.path}.persisted_slots[${i}]`));
     this.compileList(data.steps, `${this.path}.steps`);
     for (let branch; (branch = this.branches.shift()); ) this.compileList(branch.steps, branch.path, branch.label);
@@ -118,6 +121,7 @@ class FlowCompiler {
       name: this.name,
       title: optionalString(data.name, `${this.path}.name`) ?? this.name,
       description: optionalString(data.description, `${this.path}.description`),
+      ...(data.if === false && { routable: false }),
       slots: [...this.slots.values()],
       steps: this.steps,
     };
@@ -188,6 +192,9 @@ class FlowCompiler {
         if (!last) fail(path, "a link must be the last step of its list");
         if ("next" in data) fail(`${path}.next`, "a link has no next – the linked flow takes over");
         this.steps.push({ kind: "link", flow: string(data.link, `${path}.link`), carry: this.carry });
+        break;
+      case "call":
+        this.steps.push({ kind: "call", flow: string(data.call, `${path}.call`) });
         break;
       case "noop":
         if (data.noop !== true) fail(`${path}.noop`, "must be true");

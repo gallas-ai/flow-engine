@@ -106,6 +106,7 @@ const engine = new FlowEngine({
 | `action` | A name starting with `utter_` says that text from `responses`. Any other name runs your code from `actions` | `action: action_create_refund` |
 | `set_slots` | Stores values in slots without asking; `null` clears one | `set_slots: [item: null]` |
 | `link` | Hands the conversation over to another flow, with the flow's `persisted_slots`. It must be the last step of its list | `link: complaint` |
+| `call` | Runs another flow with this flow's slots, then continues with the next step. See [Calling a flow](#calling-a-flow) | `call: verify_patient` |
 | `noop` | Does nothing; it only exists to branch with `next` | `noop: true` |
 
 Any step can have an `id`, so that other steps can jump to it, and a `next`, which says where to go afterwards.
@@ -137,6 +138,51 @@ A `collect` step can also have:
         next: END
   ```
   The whole scenario is in [examples/verification](../examples/verification/reamde.md).
+
+## Calling a flow
+
+A `call` step runs another flow in the middle of this one; when the called flow ends, this flow continues after the
+`call`. Several flows can share steps this way, e.g. verifying the patient:
+
+```yaml
+flows:
+  verify_patient:
+    name: Patient verification
+    if: False # only a call starts this flow, never the customer's message
+    steps:
+      - collect: phone
+        verify: action_verify_phone # sets patient_id, or clears phone
+        max_attempts: 2
+
+  book_appointment:
+    name: Book appointment
+    steps:
+      - call: verify_patient
+        next:
+          - if: slots.patient_id is null # the verification failed
+            then: END
+          - else: ask_day
+      - id: ask_day
+        collect: day
+      - action: action_book_appointment
+```
+
+- The called flow starts with all of the caller's slots, and when it ends, all of its slots go back to the caller,
+  including the ones it cleared. A slot name means the same slot in both flows.
+- `END` in the called flow, including `on_exhausted`, ends only the called flow. The caller learns from the slots how
+  the call went, so check them right after the `call`, as above.
+- The called flow takes values from the customer's message that led to the call, like a flow the message started.
+- Cancelling inside a called flow cancels the flow the customer started, and a task switch parks both flows.
+- A called flow can call another flow, but a flow can't lead back to itself through calls and links.
+
+[Flows in code](flows-in-code.md#calling-a-flow) describes all of it in detail, and
+[examples/appointments](../examples/appointments/README.md) shows it in use.
+
+### `if: False`
+
+`if: False` on a flow hides it from routing: `Nlu.route` never sees it, so a customer's message never starts it. Only a
+`call` or a `link` does. Use it for flows that make sense only inside another flow. It is the only flow guard
+supported: any other value of `if` fails when the flows compile. In code it is [`routable: false`](flows-in-code.md#calling-a-flow).
 
 ## Where the flow goes next
 
@@ -226,8 +272,12 @@ Compile your flows in a test, and CI catches typos before a customer does.
 
 - **Slots belong to a flow, not to the conversation.** In Rasa, slots are shared by all flows and `persisted_slots`
   survive the end of a flow. Here every flow starts with empty slots, and `persisted_slots` only lists the slots a `link`
-  carries over to the linked flow. Once the conversation moves on to an unrelated flow, the values are gone.
+  carries over to the linked flow. Once the conversation moves on to an unrelated flow, the values are gone. A `call` is
+  the exception: the called flow shares the caller's slots while it runs, and hands them all back when it ends.
+- **Flow guards**: only `if: False` is supported. It hides the flow from routing, so that only a `call` or a `link`
+  starts it. Guards with conditions, such as `if: slots.verified`, aren't supported.
+- **Cancel inside a called flow** cancels the flow the customer started, together with the flows it called.
 - **`ask_before_filling: true`** means the bot always asks itself: it never takes the value from an earlier message, and
   asks again even for a value that was carried over or answered on an earlier pass.
-- **Not supported**: `call`, flow guards (`if` on a flow), `domain.yml` features beyond the slots and responses above,
+- **Not supported**: flow guards other than `if: False`, `domain.yml` features beyond the slots and responses above,
   response variations and buttons, and conditions beyond the table above.

@@ -1,14 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
-import { compileFlows, FlowEngine, type Flow } from "../src/index.ts";
+import { compileFlows, FlowEngine, type Flow, type Nlu } from "../src/index.ts";
+import * as appointments from "../examples/appointments/actions.ts";
+import { createFlows as createAppointmentFlows } from "../examples/appointments/flows.ts";
+import { nlu as appointmentsNlu } from "../examples/appointments/nlu.ts";
+import appointmentsSource from "../examples/appointments/flows.yaml?raw";
 import { registry } from "../examples/verification/actions.ts";
 import { verifyCustomer } from "../examples/verification/flows.ts";
 import { nlu } from "../examples/verification/nlu.ts";
 import source from "../examples/verification/flows.yaml?raw";
 
-function createEngine(flows: Record<string, Flow>) {
+function createEngine(flows: Record<string, Flow>, engineNlu: Nlu = nlu) {
   const said: string[] = [];
-  const engine = new FlowEngine({ flows, nlu, output: (text) => said.push(text) });
+  const engine = new FlowEngine({ flows, nlu: engineNlu, output: (text) => said.push(text) });
   const send = async (text: string) => {
     const before = said.length;
     await engine.handle(text);
@@ -96,5 +100,61 @@ describe("verify, max_attempts and on_exhausted", () => {
       steps: [{ kind: "collect", slot: "email", verify: () => ({ setSlots: { email: null } }) }],
     };
     expect(await createEngine({ verify_customer: flow }).send("verify me")).toEqual(["(a@b.com)", `${ASK}\n   1) a@b.com`]);
+  });
+});
+
+describe.each([
+  ["YAML", (actions: appointments.Actions) => compileFlows(parse(appointmentsSource), appointments.registry(actions))],
+  ["code", createAppointmentFlows],
+])("examples/appointments in %s", (_, flows) => {
+  const create = () => createEngine(flows(appointments.createActions()), appointmentsNlu);
+  const NOT_FOUND = "I couldn't find a patient with this phone number.";
+
+  it("books after the called verification and gives the caller the patient", async () => {
+    const { engine, send } = create();
+    expect(await send("book me in")).toEqual(["What is your phone number?"]);
+    expect(engine.snapshot().map(({ flow, called }) => ({ flow, called }))).toEqual([
+      { flow: "book_appointment", called: false },
+      { flow: "verify_patient", called: true },
+    ]);
+    expect(await send("555-0100")).toEqual(["Thank you, Jane, you are verified.", "Which day would you like?"]);
+    expect(engine.snapshot()[0]!.slots).toMatchObject({ patient_id: "P-17", patient_name: "Jane" });
+  });
+
+  it("ends the caller when the verification gives up", async () => {
+    const { engine, send } = create();
+    await send("book me in");
+    expect(await send("555-0199")).toEqual([NOT_FOUND, "What is your phone number?"]);
+    expect(await send("555-0198")).toEqual([NOT_FOUND, "Sorry, I couldn't verify you. Please call the front desk."]);
+    expect(engine.snapshot()).toEqual([]);
+  });
+
+  it("doesn't verify again later in the same conversation", async () => {
+    const { send } = create();
+    await send("book me in, 555-0100, Tuesday");
+    expect(await send("cancel my appointment")).toEqual(["Your appointment on Tuesday is cancelled."]);
+  });
+});
+
+describe("call and if: False", () => {
+  const compileWith = (change: (flows: any) => void) => () => {
+    const data = parse(appointmentsSource);
+    change(data.flows);
+    return new FlowEngine({ flows: compileFlows(data, appointments.registry(appointments.createActions())), nlu: appointmentsNlu, output: () => {} });
+  };
+
+  it("are checked when the YAML compiles and the engine is created", () => {
+    expect(compileWith((flows) => (flows.verify_patient.if = "slots.phone is null"))).toThrow(
+      "flows.verify_patient.if: only `if: False` is supported (the flow is started only by call or link)",
+    );
+    expect(compileWith((flows) => (flows.book_appointment.steps[0].call = ""))).toThrow("flows.book_appointment.steps[0].call: must be a non-empty string");
+    expect(compileWith((flows) => (flows.book_appointment.steps[0].call = "verify"))).toThrow("Flow book_appointment: calls unknown flow verify");
+    expect(compileWith((flows) => flows.verify_patient.steps.push({ call: "cancel_appointment" }))).toThrow(
+      "Flow verify_patient: calls cancel_appointment, which leads back to verify_patient",
+    );
+  });
+
+  it("hides a flow with if: False from routing", () => {
+    expect(compileFlows(parse(appointmentsSource), appointments.registry(appointments.createActions())).verify_patient!.routable).toBe(false);
   });
 });
