@@ -43,6 +43,7 @@
     "prepublishOnly": "npm run build",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
+    "version": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/changelog.ts release && git add CHANGELOG.md",
     "example": "node --experimental-strip-types --disable-warning=ExperimentalWarning examples/shared/run.ts"
   },
   "devDependencies": {

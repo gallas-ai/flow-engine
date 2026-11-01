@@ -21,15 +21,17 @@ touch existing non-English content, translate it to English.
 npm test                                   # vitest run (all tests)
 npx vitest run test/engine.test.ts         # one file
 npx vitest run -t "verifies a known"       # tests matching a name
-npm run typecheck                          # tsc --noEmit over src, test, examples
+npm run typecheck                          # tsc --noEmit over src, test, examples, scripts
 npm run build                              # rm -rf dist && tsc -p tsconfig.build.json (src only)
 npm run check:package                      # publint + attw on the packed package
 ```
 
 CI (`.github/workflows/ci.yml`) runs typecheck → test → build → check:package on Node 22, 24 and 26. There is no linter.
 
-Releasing: `npm version minor|patch` then `git push --follow-tags`; the `v*` tag triggers `release.yml`, which checks the
-tag against `package.json`, reruns the checks and publishes via npm trusted publishing.
+Releasing: `npm version minor|patch` then `git push --follow-tags`. npm's `version` script runs
+`scripts/changelog.ts release`, which turns `## [Unreleased]` in `CHANGELOG.md` into the new version (and fails when it
+is empty). The `v*` tag triggers `release.yml`, which checks the tag against `package.json`, takes the release notes
+from that version's `CHANGELOG.md` section, reruns the checks and publishes via npm trusted publishing.
 
 ## TypeScript setup
 
@@ -121,3 +123,17 @@ column naming the features) and its README's ` ```transcript ` block.
 User-facing documentation is `README.md` plus `docs/flows-in-code.md`, `docs/yaml.md` (including the "Differences from
 Rasa" section) and `docs/nlu.md` (the `Nlu` interface and engine options). The README links to the docs with absolute
 GitHub URLs, because it is also rendered on npm.
+
+## Changelog
+
+`CHANGELOG.md` is for developers using the package, not for contributors. Every change ends with this decision, next to
+the example decision above:
+
+- **Add an entry under `## [Unreleased]`** for anything a user of the package notices: the public API, the YAML
+  syntax, behaviour (events, `snapshot()`, message texts), user-facing docs and new examples. Use the Keep a Changelog
+  sections (`Added`, `Changed`, `Fixed`, `Removed`, plus `Docs & examples`), write to "you", the developer, and keep
+  "customer" for the person chatting with the bot (`GLOSSARY.md`). Link the docs section with an absolute GitHub URL.
+  Mark changes that can break existing code with ⚠️ and say whose code breaks.
+- **No entry**: refactoring, tests, CLAUDE.md, the example runner, dev dependencies, CI.
+
+Never edit a released version's section, and never write a version heading yourself: `npm version` does that.

@@ -137,7 +137,7 @@ A `collect` step can also have:
       - action: utter_verification_failed
         next: END
   ```
-  The whole scenario is in [examples/verification](../examples/verification/reamde.md).
+  The whole scenario is in [examples/verification](../examples/verification/README.md).
 
 ## Calling a flow
 

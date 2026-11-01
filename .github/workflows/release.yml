@@ -36,6 +36,10 @@ jobs:
             exit 1
           fi
 
+      # Before anything is published: a release without its CHANGELOG.md section stops here.
+      - name: Extract the release notes from CHANGELOG.md
+        run: node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/changelog.ts notes "$GITHUB_REF_NAME" > "$RUNNER_TEMP/notes.md"
+
       - run: npm ci
 
       - run: npm run typecheck
@@ -56,6 +60,6 @@ jobs:
             npm publish --ignore-scripts
           fi
 
-      - run: gh release create "$GITHUB_REF_NAME" --generate-notes
+      - run: gh release create "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"
         env:
           GH_TOKEN: ${{ github.token }}
