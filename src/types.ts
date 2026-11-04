@@ -71,6 +71,11 @@ export type Flow = {
   description?: string;
   /** false = hidden from `Nlu.route`: only a `call` or a `link` starts the flow (YAML: `if: False`). Defaults to true. */
   routable?: boolean;
+  /**
+   * Slots that go to the parked flows when this flow leaves: at its end, on a cancel or on a `link` (YAML: `persisted_slots`,
+   * which a `link` carries too). The persisted slots of the flows it calls count as well.
+   */
+  persistedSlots?: string[];
   slots: SlotDefinition[];
   steps: Step[];
 };

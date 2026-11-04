@@ -77,6 +77,10 @@ Semantics that are easy to break:
 - A called frame and its callers form a **call chain** (see `GLOSSARY.md`): `cancel` removes the whole chain, a
   `task_switch` parks it, and the messages name the flow the customer started. `routable: false` (YAML `if: False`)
   hides a flow from `nlu.route`. Why called flows share slots: `docs/adr/0001-called-flows-share-slots.md`.
+- `persistedSlots` (YAML `persisted_slots`, which also sets a `link`'s `carry`) go to all parked flows when a flow the
+  customer started leaves, at its end, on a cancel or on a `link`, including those of the flows it calls. The parked
+  `collect` checks the value and runs `verify` again; a slot without a value changes nothing
+  (`docs/adr/0003-persisted-slots-reach-parked-flows.md`).
 - `verify` on a collect step is an action. It turns a value down by **clearing the slot** (`setSlots: { x: null }`).
   Turned-down values from `verify` or `validate` count toward `maxAttempts`, after which the flow jumps to `onExhausted`
   (default `END`).

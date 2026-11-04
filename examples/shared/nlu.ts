@@ -9,16 +9,19 @@ export type KeywordNluConfig = {
   extract: Record<string, (text: string, answering: boolean) => SlotValue | undefined>;
   /** A reply to a question that matches cancels the flow. */
   cancel?: RegExp;
+  /** A reply to a question that matches parks the flow and starts the flow it routes to. */
+  taskSwitch?: RegExp;
 };
 
-/** Every other reply to a question is an answer, never a digression or task switch. */
-export function keywordNlu({ routes, extract, cancel }: KeywordNluConfig): Nlu {
+/** Every other reply to a question is an answer, never a digression. */
+export function keywordNlu({ routes, extract, cancel, taskSwitch }: KeywordNluConfig): Nlu {
   return {
     async route(text) {
       return Object.entries(routes).find(([, pattern]) => pattern.test(text))?.[0] ?? null;
     },
     async classifyTurn(_flowTitle, _question, text) {
-      return cancel?.test(text) ? "cancel" : "answer";
+      if (cancel?.test(text)) return "cancel";
+      return taskSwitch?.test(text) ? "task_switch" : "answer";
     },
     async extract(_flow, wanted, _slots, text, question) {
       const values: Slots = {};

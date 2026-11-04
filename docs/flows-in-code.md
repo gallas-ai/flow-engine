@@ -154,3 +154,32 @@ answers the message. Use it for flows that make sense only inside another flow, 
 `engine.snapshot()` marks called frames with `called: true`; the frame below a called frame is its caller.
 
 [examples/appointments](../examples/appointments/README.md) shows two flows calling the same verification.
+
+## Slots for parked flows
+
+A task switch parks the flow that was asking, and when it resumes it goes on from its waiting question. If the other
+task collected the same slot, the customer would be asked for it twice. List such a slot in `persistedSlots`:
+
+```ts
+const verify: Flow = {
+  name: "verify",
+  title: "Patient verification",
+  routable: false,
+  persistedSlots: ["phone"], // a flow parked on this question doesn't ask it again
+  slots: [{ name: "phone", type: "text", description: "the patient's phone number", question: () => "What is your phone number?" }],
+  steps: [{ kind: "collect", slot: "phone", verify: verifyPhone }],
+};
+```
+
+- The values go to all parked flows when the flow leaves: at its end, on a cancel and on a `link`. The `persistedSlots`
+  of the flows it calls count too, so a task that calls `verify` hands over `phone` without listing it.
+- A value replaces an older one in the parked flow. A slot without a value changes nothing.
+- The parked `collect` step checks the value like any other: `validate` and `options` apply, and `verify` runs again.
+  The steps after it run too, so make sure that an action can run twice and doesn't say the same thing again.
+- Clear a value you finally turned down before the flow ends, or it reaches the parked flow.
+- A `prefill: false` slot still asks.
+- Only parked flows get the values: a flow started later starts with empty slots. A question whose slot nobody
+  filled is asked again.
+- `persistedSlots` doesn't affect a `link`: what it takes along is its `carry`. In YAML, `persisted_slots` sets both.
+
+[examples/appointments](https://github.com/gallas-ai/flow-engine/tree/main/examples/appointments) shows this.

@@ -112,6 +112,7 @@ export class FlowEngine {
         // cancelling a called flow (verification) cancels the task the customer started (booking)
         const [started] = this.chain();
         this.stack.splice(this.stack.indexOf(started!));
+        this.handToParked(started!.flow, frame.slots);
         this.output(this.messages.flowCancelled(started!.flow.title));
         return this.advance(true);
       }
@@ -232,7 +233,10 @@ export class FlowEngine {
         this.stack.pop();
         this.emit({ type: "flowEnded", flow: frame.flow.name, title: frame.flow.title });
         if (frame.called) this.top!.slots = frame.slots; // the caller goes on with the next step, no "back to…" line
-        else returning = true; // whatever is below gets a "back to…" line
+        else {
+          this.handToParked(frame.flow, frame.slots);
+          returning = true; // whatever is below gets a "back to…" line
+        }
         continue;
       }
 
@@ -289,6 +293,7 @@ export class FlowEngine {
         case "link": {
           // e.g. a "return" turns out to be a "complaint": replace the flow, keep what we know
           this.stack.pop();
+          this.handToParked(frame.flow, frame.slots);
           if (step.message) this.output(step.message);
           const carried = Object.fromEntries(step.carry.filter((name) => name in frame.slots).map((name) => [name, frame.slots[name]!]));
           await this.push(step.flow, carried, false, new Set());
@@ -301,6 +306,21 @@ export class FlowEngine {
           continue;
       }
     }
+  }
+
+  /** A flow the customer started has left the stack: everything on it now is parked and gets its persisted slots, for its collect steps to check. */
+  private handToParked(flow: Flow, slots: Slots): void {
+    for (const name of this.persistedSlots(flow)) {
+      if (!(name in slots)) continue; // the flow started empty: no value means it didn't touch the slot, not that it cleared it
+      for (const parked of this.stack) {
+        parked.slots[name] = slots[name]!;
+        parked.unchecked.add(name);
+      }
+    }
+  }
+
+  private persistedSlots(flow: Flow): string[] {
+    return [...(flow.persistedSlots ?? []), ...flow.steps.flatMap((step) => (step.kind === "call" ? this.persistedSlots(this.flows[step.flow]!) : []))];
   }
 
   private async run(frame: Frame, action: Action): Promise<void> {

@@ -189,6 +189,36 @@ flows:
 `call` or a `link` does. Use it for flows that make sense only inside another flow. It is the only flow guard
 supported: any other value of `if` fails when the flows compile. In code it is [`routable: false`](flows-in-code.md#calling-a-flow).
 
+## Slots for parked flows
+
+A task switch parks the flow that was asking, and when it resumes it goes on from its waiting question. If the other
+task collected the same slot, the customer would be asked for it twice. List such a slot in `persisted_slots`:
+
+```yaml
+flows:
+  verify_patient:
+    if: False
+    persisted_slots: [phone] # a flow parked on this question doesn't ask it again
+    steps:
+      - collect: phone
+        verify: action_verify_phone
+```
+
+- The values go to all parked flows when the flow leaves: at its end, on a cancel and on a `link`. The `persisted_slots`
+  of the flows it calls count too, so a task that calls `verify_patient` hands over `phone` without listing it.
+- A value replaces an older one in the parked flow. A slot without a value changes nothing.
+- The parked `collect` step checks the value like any other: `rejections` and options apply, and `verify` runs again.
+  The steps after it run too, so make sure that an action can run twice and doesn't say the same thing again.
+- Clear a value you finally turned down before the flow ends, or it reaches the parked flow. A `verify` that keeps a
+  failed value needs a `set_slots` step clearing it.
+- `ask_before_filling: true` still asks.
+- Only parked flows get the values: a flow started later starts with empty slots. A question whose slot nobody
+  filled is asked again.
+
+[examples/appointments](https://github.com/gallas-ai/flow-engine/tree/main/examples/appointments) shows this. Why it
+works this way: [ADR 0003](adr/0003-persisted-slots-reach-parked-flows.md). In code it is
+[`persistedSlots`](flows-in-code.md#slots-for-parked-flows).
+
 ## Where the flow goes next
 
 Without `next`, the flow continues with the step below. `next` changes that:
@@ -277,8 +307,11 @@ Compile your flows in a test, and CI catches typos before a customer does.
 
 - **Slots belong to a flow, not to the conversation.** In Rasa, slots are shared by all flows and `persisted_slots`
   survive the end of a flow. Here every flow starts with empty slots, and `persisted_slots` only lists the slots a `link`
-  carries over to the linked flow. Once the conversation moves on to an unrelated flow, the values are gone. A `call` is
-  the exception: the called flow shares the caller's slots while it runs, and hands them all back when it ends.
+  carries over to the linked flow and the slots that go to [parked flows](#slots-for-parked-flows). Once the conversation
+  moves on to an unrelated flow, the values are gone. A `call` is the exception: the called flow shares the caller's
+  slots while it runs, and hands them all back when it ends.
+- **`persisted_slots` accepts any slot.** Rasa accepts only slots used in `collect` or `set_slots` steps, because it
+  doesn't reset the ones an action set. Here a slot an action set ends with its flow unless it is listed.
 - **Flow guards**: only `if: False` is supported. It hides the flow from routing, so that only a `call` or a `link`
   starts it. Guards with conditions, such as `if: slots.verified`, aren't supported.
 - **Cancel inside a called flow** cancels the flow the customer started, together with the flows it called.

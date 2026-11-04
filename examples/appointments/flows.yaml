@@ -4,6 +4,7 @@ flows:
     name: Patient verification
     description: Finds the patient by phone number before anything is done with their appointments.
     if: False # hidden from routing: only a `call` starts it
+    persisted_slots: [phone] # a flow parked on this question doesn't ask it again
     steps:
       - action: action_recall_patient # code: sets patient_id when this conversation verified the patient already
         next:
@@ -18,7 +19,6 @@ flows:
         on_exhausted:
           - action: utter_verification_failed
             next: END
-      - action: utter_verified
 
   book_appointment:
     name: Book appointment
@@ -48,6 +48,5 @@ flows:
 
 responses:
   utter_ask_phone: What is your phone number?
-  utter_verified: Thank you, {patient_name}, you are verified.
   utter_verification_failed: Sorry, I couldn't verify you. Please call the front desk.
   utter_ask_day: Which day would you like?

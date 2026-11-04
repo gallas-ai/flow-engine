@@ -9,12 +9,12 @@ export function createFlows(actions: Actions): Record<string, Flow> {
     title: "Patient verification",
     description: "Finds the patient by phone number before anything is done with their appointments.",
     routable: false, // like `if: False`: only a `call` starts it
+    persistedSlots: ["phone"], // a flow parked on this question doesn't ask it again
     slots: [{ name: "phone", type: "text", description: "the patient's phone number", question: () => "What is your phone number?" }],
     steps: [
       { kind: "action", run: actions.recallPatient },
       { kind: "goto", to: END, when: (slots) => "patient_id" in slots },
       { kind: "collect", slot: "phone", verify: actions.verifyPhone, maxAttempts: 2, onExhausted: "failed" },
-      { kind: "say", text: (slots) => `Thank you, ${slots.patient_name}, you are verified.` },
       { kind: "end" },
       { id: "failed", kind: "say", text: () => "Sorry, I couldn't verify you. Please call the front desk." },
     ],

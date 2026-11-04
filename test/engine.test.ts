@@ -523,6 +523,166 @@ describe("call", () => {
   });
 });
 
+describe("persisted slots", () => {
+  let verifications = 0;
+
+  const verify: Flow = {
+    name: "verify",
+    title: "Patient verification",
+    routable: false,
+    persistedSlots: ["birth_year"],
+    slots: [{ name: "birth_year", type: "text", description: "year of birth", question: () => "What is your year of birth?" }],
+    steps: [
+      {
+        kind: "collect",
+        slot: "birth_year",
+        verify: (slots): ActionResult => {
+          verifications++;
+          return slots.birth_year === "1980" ? { setSlots: { patient_id: "P1" } } : { say: "Unknown patient.", setSlots: { birth_year: null } };
+        },
+        maxAttempts: 2,
+      },
+    ],
+  };
+
+  const booking: Flow = {
+    name: "booking",
+    title: "Book appointment",
+    slots: [{ name: "day", type: "text", description: "day of the appointment", question: () => "Which day?" }],
+    steps: [
+      { kind: "call", flow: "verify" },
+      { kind: "goto", to: END, when: (slots) => !("patient_id" in slots) },
+      { kind: "collect", slot: "day" },
+      { kind: "action", run: (slots) => ({ say: `Booked ${slots.day} for patient ${slots.patient_id}.` }) },
+    ],
+  };
+
+  const changeAddress: Flow = {
+    name: "address",
+    title: "Address change",
+    slots: [confirmSlot(() => "Changing the address.")],
+    steps: [
+      { kind: "call", flow: "verify" },
+      { kind: "goto", to: END, when: (slots) => !("patient_id" in slots) },
+      { kind: "collect", slot: "confirm" },
+      { kind: "say", text: () => "Address changed." },
+    ],
+  };
+
+  /** A task that only sets slots, to be started on top of whatever is parked. */
+  const setting = (values: Slots, persistedSlots: string[]): Flow => ({ name: "setter", title: "Setter", persistedSlots, slots: [], steps: [{ kind: "set", values }] });
+
+  const create = (flows: Record<string, Flow> = {}) => createEngine(undefined, { verify, booking, address: changeAddress, ...flows });
+
+  /** A booking parked on the verification's question, with the address change running on top of it. */
+  const parked = async (flows: Record<string, Flow> = {}) => {
+    const conversation = create(flows);
+    await conversation.send("book an appointment");
+    await conversation.send("wait, change my address");
+    return conversation;
+  };
+
+  beforeEach(() => {
+    verifications = 0;
+  });
+
+  it("doesn't ask a parked flow for a slot the finished flow persisted, and runs its verify again", async () => {
+    const { engine, send } = await parked();
+    expect(await send("1980")).toEqual(["Changing the address. Submit?"]);
+    expect(await send("yes")).toEqual(["Address changed.", "Back to Book appointment: Which day?"]);
+    expect(verifications).toBe(2);
+    expect(engine.snapshot()).toEqual([
+      { flow: "booking", title: "Book appointment", step: 2, waitingFor: "day", slots: { birth_year: "1980", patient_id: "P1" }, called: false },
+    ]);
+    expect(await send("tuesday")).toEqual(["Booked tuesday for patient P1."]);
+  });
+
+  it("asks a parked flow again when no flow persisted the slot", async () => {
+    const { persistedSlots: _, ...plain } = verify;
+    const { send } = await parked({ verify: plain });
+    await send("1980");
+    expect(await send("yes")).toEqual(["Address changed.", "Back to Book appointment: What is your year of birth?"]);
+  });
+
+  it("hands the slots over when the flow is cancelled", async () => {
+    const { send } = await parked();
+    await send("1980");
+    expect(await send("cancel it")).toEqual([`Understood, "Address change" is cancelled.`, "Back to Book appointment: Which day?"]);
+  });
+
+  it("hands the slots over when the flow links to another one", async () => {
+    const note: Flow = { name: "note", title: "Note", slots: [], steps: [{ kind: "say", text: () => "Noted." }] };
+    const linking: Flow = { ...changeAddress, steps: [{ kind: "call", flow: "verify" }, { kind: "link", flow: "note", carry: [] }] };
+    const { send } = await parked({ note, address: linking });
+    expect(await send("1980")).toEqual(["Noted.", "Back to Book appointment: Which day?"]);
+  });
+
+  it("hands nothing over when the verification failed", async () => {
+    const { send } = await parked();
+    expect(await send("1970")).toEqual(["Unknown patient.", "What is your year of birth?"]);
+    expect(await send("1971")).toEqual(["Unknown patient.", "Back to Book appointment: What is your year of birth?"]);
+  });
+
+  it("gives the slots to every parked flow", async () => {
+    const { engine } = await parked({ setter: setting({ birth_year: "1980", other: "x" }, ["birth_year"]) });
+    await engine.start("setter");
+    // the address change is back and past its verification; the booking below it holds the value for its own
+    expect(engine.snapshot().map(({ flow, waitingFor, slots }) => ({ flow, waitingFor, slots }))).toEqual([
+      { flow: "booking", waitingFor: null, slots: { birth_year: "1980" } },
+      { flow: "verify", waitingFor: "birth_year", slots: { birth_year: "1980" } },
+      { flow: "address", waitingFor: "confirm", slots: { birth_year: "1980", patient_id: "P1" } },
+    ]);
+  });
+
+  it("replaces an older value in a parked flow, but a slot without a value changes nothing", async () => {
+    const conversation = create({ setter: setting({ day: "friday" }, ["day", "birth_year"]) });
+    await conversation.send("book tuesday");
+    await conversation.engine.start("setter");
+    expect(conversation.engine.snapshot().at(-1)!.slots).toEqual({ day: "friday" });
+
+    const unchanged = create({ setter: setting({}, ["day"]) });
+    await unchanged.send("book tuesday");
+    await unchanged.engine.start("setter");
+    expect(unchanged.engine.snapshot().at(-1)!.slots).toEqual({ day: "tuesday" });
+  });
+
+  it("checks the value by the parked flow's own rules", async () => {
+    const strict: Flow = {
+      name: "strict",
+      title: "Strict",
+      slots: [{ name: "day", type: "text", description: "day", question: () => "Which day?", validate: (value) => (value === "sunday" ? "We're closed on Sundays." : null) }],
+      steps: [{ kind: "collect", slot: "day" }],
+    };
+    const { engine } = create({ strict, setter: setting({ day: "sunday" }, ["day"]) });
+    await engine.start("strict");
+    await engine.start("setter");
+    const { flow, waitingFor, slots } = engine.snapshot().at(-1)!;
+    expect({ flow, waitingFor, slots }).toEqual({ flow: "strict", waitingFor: "day", slots: {} });
+  });
+
+  it("still asks a prefill: false slot", async () => {
+    const consent: Flow = {
+      name: "consent",
+      title: "Consent",
+      slots: [{ name: "agree", type: "bool", description: "consent", question: () => "Do you agree?", prefill: false }],
+      steps: [{ kind: "collect", slot: "agree" }],
+    };
+    const { engine } = create({ consent, setter: setting({ agree: true }, ["agree"]) });
+    await engine.start("consent");
+    await engine.start("setter");
+    const { flow, waitingFor, slots } = engine.snapshot().at(-1)!;
+    expect({ flow, waitingFor, slots }).toEqual({ flow: "consent", waitingFor: "agree", slots: {} });
+  });
+
+  it("gives nothing to a flow started later", async () => {
+    const { send } = create();
+    await send("change my address");
+    await send("1980");
+    await send("yes");
+    expect(await send("book an appointment")).toEqual(["What is your year of birth?"]);
+  });
+});
+
 describe("messages", () => {
   it("lets the caller override the engine's own texts", async () => {
     const { send } = createEngine({ flowCancelled: (flowTitle) => `${flowTitle} zrušeno.` });

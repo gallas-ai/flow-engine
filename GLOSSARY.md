@@ -30,3 +30,8 @@ _Avoid_: Sub-flow, include, nested flow
 The flow the customer started together with the flows it called, directly or through other called flows. Cancelling or
 parking acts on the whole call chain, never on one called flow alone.
 _Avoid_: Sub-flow stack
+
+**Parking**:
+Setting a call chain aside because the customer switched to another task. The chain continues where it stopped once that
+task is over.
+_Avoid_: Suspending, pausing, interrupting
