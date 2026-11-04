@@ -373,6 +373,44 @@ describe("call", () => {
     expect(engine.snapshot().map((frame) => frame.flow)).toEqual(["booking", "verify"]);
   });
 
+  it("resumes a parked flow on a task switch to it, and parks the current one", async () => {
+    const { engine, send } = create();
+    await send("book an appointment");
+    await send("wait, change my address");
+    expect(await send("book an appointment")).toEqual([`OK, I'll put "Address change" aside for now.`, "Back to Book appointment: What is your year of birth?"]);
+    expect(engine.snapshot().map((frame) => frame.flow)).toEqual(["address", "booking", "verify"]);
+    expect(await send("1980")).toEqual(["Verified.", "Which day?"]);
+    expect(await send("tuesday")).toEqual(["Booked tuesday for patient P1.", "Back to Address change: What is the new address?"]);
+    expect(engine.snapshot().map((frame) => frame.flow)).toEqual(["address"]);
+  });
+
+  it("reads the message that resumes a parked flow", async () => {
+    const { send } = create();
+    await send("book an appointment");
+    await send("wait, change my address");
+    await send("book it for tuesday");
+    expect(await send("1980")).toEqual(["Verified.", "Booked tuesday for patient P1.", "Back to Address change: What is the new address?"]);
+  });
+
+  it("resumes a parked flow on a link to it, without a resume line and with the carried slots", async () => {
+    const linking: Flow = {
+      name: "address",
+      title: "Address change",
+      slots: [],
+      steps: [
+        { kind: "set", values: { day: "tuesday", other: "x" } },
+        { kind: "link", flow: "booking", carry: ["day"], message: "Let's get back to your appointment." },
+      ],
+    };
+    const { engine, send } = create({ address: linking });
+    await send("book an appointment");
+    expect(await send("wait, change my address")).toEqual([`OK, I'll put "Book appointment" aside for now.`, "Let's get back to your appointment.", "What is your year of birth?"]);
+    expect(engine.snapshot().map((frame) => frame.flow)).toEqual(["booking", "verify"]);
+    expect(engine.snapshot().at(-1)!.slots).toEqual({ day: "tuesday" });
+    expect(await send("1980")).toEqual(["Verified.", "Booked tuesday for patient P1."]);
+    expect(engine.snapshot()).toEqual([]);
+  });
+
   it("rejects a called flow that uses a link when the engine is created", () => {
     const callingGate = (steps: Flow["steps"]) => () =>
       create({ gate: { name: "gate", title: "Gate", routable: false, slots: [], steps }, booking: { ...booking, steps: [{ kind: "call", flow: "gate" }, ...booking.steps.slice(1)] } });

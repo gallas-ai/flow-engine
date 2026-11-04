@@ -103,7 +103,9 @@ export class FlowEngine {
         const chain = this.chain();
         if (flow && !chain.some((frame) => frame.flow.name === flow)) {
           this.output(this.messages.flowParked(chain[0]!.flow.title)); // the whole call chain waits
-          return this.start(flow, text);
+          if (!this.resumeParked(flow)) return this.start(flow, text);
+          await this.fill(this.top!, text, true);
+          return this.advance(true);
         }
         this.output(await this.nlu.answer(text));
         return this.advance(true);
@@ -296,7 +298,11 @@ export class FlowEngine {
           this.handToParked(frame.flow, frame.slots);
           if (step.message) this.output(step.message);
           const carried = Object.fromEntries(step.carry.filter((name) => name in frame.slots).map((name) => [name, frame.slots[name]!]));
-          await this.push(step.flow, carried, false, new Set());
+          if (this.resumeParked(step.flow)) {
+            const resumed = this.top!;
+            Object.assign(resumed.slots, carried);
+            for (const name of Object.keys(carried)) resumed.unchecked.add(name);
+          } else await this.push(step.flow, carried, false, new Set());
           returning = false;
           continue;
         }
@@ -306,6 +312,17 @@ export class FlowEngine {
           continue;
       }
     }
+  }
+
+  /** A flow runs only once: moves the parked call chain with this flow to the top of the stack, if there is one. */
+  private resumeParked(name: string): boolean {
+    let start = this.stack.findLastIndex((frame) => frame.flow.name === name);
+    if (start < 0) return false;
+    let end = start + 1;
+    while (this.stack[start]!.called) start--;
+    while (this.stack[end]?.called) end++;
+    this.stack.push(...this.stack.splice(start, end - start));
+    return true;
   }
 
   /** A flow the customer started has left the stack: everything on it now is parked and gets its persisted slots, for its collect steps to check. */

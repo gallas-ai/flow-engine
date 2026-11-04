@@ -105,7 +105,7 @@ const engine = new FlowEngine({
 | `collect` | Asks for a slot. Skipped when the slot is already known, e.g. from the first message | `collect: item` |
 | `action` | A name starting with `utter_` says that text from `responses`. Any other name runs your code from `actions` | `action: action_create_refund` |
 | `set_slots` | Stores values in slots without asking; `null` clears one | `set_slots: [item: null]` |
-| `link` | Hands the conversation over to another flow, with the flow's `persisted_slots`. It must be the last step of its list | `link: complaint` |
+| `link` | Hands the conversation over to another flow, with the flow's `persisted_slots`. If that flow is parked, it resumes where it stopped instead of starting again. It must be the last step of its list | `link: complaint` |
 | `call` | Runs another flow with this flow's slots, then continues with the next step. See [Calling a flow](#calling-a-flow) | `call: verify_patient` |
 | `noop` | Does nothing; it only exists to branch with `next` | `noop: true` |
 
@@ -310,6 +310,8 @@ Compile your flows in a test, and CI catches typos before a customer does.
   carries over to the linked flow and the slots that go to [parked flows](#slots-for-parked-flows). Once the conversation
   moves on to an unrelated flow, the values are gone. A `call` is the exception: the called flow shares the caller's
   slots while it runs, and hands them all back when it ends.
+- **A `link` to a parked flow** resumes that flow here. Rasa starts a second copy, and later asks the customer whether to
+  continue the parked one; this engine has no such question. A task switch to a parked flow resumes it in both.
 - **`persisted_slots` accepts any slot.** Rasa accepts only slots used in `collect` or `set_slots` steps, because it
   doesn't reset the ones an action set. Here a slot an action set ends with its flow unless it is listed.
 - **Flow guards**: only `if: False` is supported. It hides the flow from routing, so that only a `call` or a `link`

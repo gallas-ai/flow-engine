@@ -16,7 +16,7 @@ What it handles for you:
 - **Actions**: your code (sync or async) looks things up, says something and stores results the next steps decide on.
 - **Options**: choice questions offer only valid values. A single option is picked without asking.
 - **Turn types**: an answer, a question about the step, a digression, a task switch, or a cancel.
-- **Flow stack**: a task switch parks the current flow and resumes it afterwards.
+- **Flow stack**: a task switch parks the current flow and resumes it afterwards, or when the customer asks for it again.
 - **Links**: one flow can hand over to another and carry values along.
 - **Calls**: one flow can run another, e.g. a verification several flows share, and continue when it ends.
 - **YAML**: flows can be written as YAML that reads like the support team's process documentation.

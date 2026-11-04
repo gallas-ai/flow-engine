@@ -81,6 +81,8 @@ Semantics that are easy to break:
   customer started leaves, at its end, on a cancel or on a `link`, including those of the flows it calls. The parked
   `collect` checks the value and runs `verify` again; a slot without a value changes nothing
   (`docs/adr/0003-persisted-slots-reach-parked-flows.md`).
+- A flow runs only once: a `task_switch` or `link` to a parked flow moves its whole call chain to the top of the stack
+  instead of starting a copy. A `call` always pushes a frame, because several chains may call the same flow.
 - `verify` on a collect step is an action. It turns a value down by **clearing the slot** (`setSlots: { x: null }`).
   Turned-down values from `verify` or `validate` count toward `maxAttempts`, after which the flow jumps to `onExhausted`
   (default `END`).

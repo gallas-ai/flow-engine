@@ -33,5 +33,5 @@ _Avoid_: Sub-flow stack
 
 **Parking**:
 Setting a call chain aside because the customer switched to another task. The chain continues where it stopped once that
-task is over.
+task is over, or as soon as the customer asks for it again.
 _Avoid_: Suspending, pausing, interrupting
