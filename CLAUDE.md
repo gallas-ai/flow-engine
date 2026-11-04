@@ -51,8 +51,9 @@ from that version's `CHANGELOG.md` section, reruns the checks and publishes via 
   - `handle(text)`: with nothing waiting, `nlu.route` picks a flow (or `nlu.answer` replies). While waiting on a question,
     `nlu.classifyTurn` decides between `answer`, `step_question`, `digression`, `task_switch` (parks the current frame and
     pushes a new one) and `cancel`.
-  - `fill()` runs `nlu.extract` for **all** open slots, not just the asked one, then type-checks and runs `validate`.
-    The same path does prefill from the opening message.
+  - `fill()` runs `nlu.extract` once for **all** open slots of the call chain and the flows it calls, not just the asked
+    one, then type-checks and runs `validate`; a value for another flow is checked at its `collect` step
+    (`docs/adr/0002-one-read-across-the-call-chain.md`). The same path does prefill from the opening message.
   - `advance()` walks the steps until it must ask a question. A `collect` whose slot is already filled is skipped. A
     choice slot with exactly one option is auto-selected. When the frame's steps run out, it pops and the frame below
     resumes with a `messages.resume` line. A `link` replaces the frame and carries the listed slots along. A `call`

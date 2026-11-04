@@ -17,6 +17,7 @@ const variants: Record<"yaml" | "code", (actions: Actions) => Promise<Record<str
 const conversations = [
   ["I'd like to book an appointment", "555-0100", "Tuesday", "Please cancel my appointment"],
   ["Book me in for Friday, my number is 555-0199", "forget it"],
+  ["Book me in", "555-0199, Friday please", "555-0100"],
 ];
 
 const selected = selectVariants(["yaml", "code"] as const);

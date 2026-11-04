@@ -20,6 +20,8 @@ type Frame = {
   answered: Set<string>;
   /** Pushed by a `call` step: the frame below waits for it and gets its slots back. */
   called: boolean;
+  /** Slots read for another flow and not checked yet: their own collect step does that. Shared along a call chain, like the slots. */
+  unchecked: Set<string>;
 };
 
 export type FlowEngineOptions = {
@@ -86,16 +88,16 @@ export class FlowEngine {
     switch (turnType) {
       case "answer": {
         const { filled, reported } = await this.fill(frame, text, false);
-        if (!filled.includes(slot.name) && !reported) {
+        if (!filled.length && !reported) {
           this.output(++frame.attempts >= 2 ? this.messages.stillNotUnderstood() : this.messages.notUnderstood());
         }
-        return this.advance(false, text);
+        return this.advance(false);
       }
       case "step_question":
       case "digression":
         await this.fill(frame, text, false); // mixed turn: "Brazil, and how long does a refund take?"
         this.output(await this.nlu.answer(text, turnType === "step_question" ? { question: slot.question(frame.slots), help: slot.help } : undefined));
-        return this.advance(true, text);
+        return this.advance(true);
       case "task_switch": {
         const flow = await this.route(text);
         const chain = this.chain();
@@ -117,14 +119,14 @@ export class FlowEngine {
   }
 
   async start(name: string, text?: string, carried: Slots = {}): Promise<void> {
-    await this.push(name, carried, false, text);
-    return this.advance(false, text);
+    await this.push(name, carried, false, new Set(), text);
+    return this.advance(false);
   }
 
-  private async push(name: string, carried: Slots, called: boolean, text?: string): Promise<void> {
+  private async push(name: string, carried: Slots, called: boolean, unchecked: Set<string>, text?: string): Promise<void> {
     const flow = this.flows[name];
     if (!flow) throw new Error(`Unknown flow ${name}`);
-    const frame: Frame = { flow, step: 0, slots: { ...carried }, attempts: 0, failures: new Map(), noAutoSelect: new Set(), answered: new Set(), called };
+    const frame: Frame = { flow, step: 0, slots: { ...carried }, attempts: 0, failures: new Map(), noAutoSelect: new Set(), answered: new Set(), called, unchecked };
     this.stack.push(frame);
     this.emit({ type: "flowStarted", flow: flow.name, title: flow.title, carried: Object.keys(carried), called });
     if (text) await this.fill(frame, text, true); // ← PREFILL from the opening message
@@ -132,16 +134,37 @@ export class FlowEngine {
 
   // ───────────────────────── understanding → validated slots ─────────────────────────
 
+  /**
+   * The slots a message can fill: of the call chain and the flows it calls, even those not started yet.
+   * With the same slot in several flows, the nearest flow that may take the value early describes it.
+   */
+  private wanted(frame: Frame, waiting: SlotDefinition | undefined, prefill: boolean): SlotDefinition[] {
+    const flows = new Set<Flow>();
+    const visit = (flow: Flow) => {
+      if (flows.has(flow)) return;
+      flows.add(flow);
+      for (const step of flow.steps) if (step.kind === "call") visit(this.flows[step.flow]!);
+    };
+    for (const { flow } of this.chain().reverse()) visit(flow);
+
+    const wanted = new Map<string, SlotDefinition>();
+    for (const flow of flows) {
+      for (const definition of flow.slots) {
+        if (wanted.has(definition.name) || definition.name in frame.slots) continue;
+        if (definition.prefill !== false || (!prefill && definition === waiting)) wanted.set(definition.name, definition);
+      }
+    }
+    return [...wanted.values()];
+  }
+
   /** Runs NLU over the message and stores every valid value it finds. */
   private async fill(frame: Frame, text: string, prefill: boolean): Promise<{ filled: string[]; reported: boolean }> {
     const waiting = frame.waitingFor ? this.slotDefinition(frame.flow, frame.waitingFor) : undefined;
     // the user may answer more than we asked ("Brazil, tastes bitter, to my account") → look for ALL open slots
-    const wanted = frame.flow.slots.filter(
-      (definition) => !(definition.name in frame.slots) && (definition.prefill !== false || (!prefill && definition === waiting)),
-    );
+    const wanted = this.wanted(frame, waiting, prefill);
     if (!wanted.length) return { filled: [], reported: false };
 
-    const extraction = await this.nlu.extract(frame.flow, wanted, frame.slots, text, waiting?.question(frame.slots));
+    const extraction = await this.nlu.extract(this.chain()[0]!.flow, wanted, frame.slots, text, waiting?.question(frame.slots));
     const values = { ...extraction.values };
     // the slot we asked about with several options → let the NLU pick one ("the one with the grinder", "number two")
     if (waiting?.type === "choice" && !prefill) {
@@ -158,6 +181,15 @@ export class FlowEngine {
     const filled: string[] = [];
     let reported = false; // did we already tell the user what's wrong?
     for (const definition of wanted) {
+      if (!frame.flow.slots.includes(definition)) {
+        // another flow's slot: its collect step checks the value, so the customer doesn't hear about it mid-verification
+        const value = values[definition.name];
+        if (value === undefined || value === "" || (definition.type !== "choice" && !this.hasType(definition, value, frame.slots))) continue;
+        frame.slots[definition.name] = value;
+        frame.unchecked.add(definition.name);
+        filled.push(definition.name);
+        continue;
+      }
       if (definition.type === "choice" && extraction.notAmongOptions.includes(definition.name) && !(definition.name in values)) {
         frame.noAutoSelect.add(definition.name);
         if (definition.notAvailable) {
@@ -188,8 +220,8 @@ export class FlowEngine {
 
   // ───────────────────────── the state machine ─────────────────────────
 
-  /** Walk the steps until we need input from the user (or run out of flows); `text` = this turn's message, for prefill. */
-  private async advance(returning: boolean, text?: string): Promise<void> {
+  /** Walk the steps until we need input from the user (or run out of flows). */
+  private async advance(returning: boolean): Promise<void> {
     while (true) {
       const frame = this.top;
       if (!frame) return;
@@ -208,9 +240,10 @@ export class FlowEngine {
         case "collect": {
           const definition = this.slotDefinition(frame.flow, step.slot);
           const answered = frame.answered.delete(step.slot);
+          const unchecked = frame.unchecked.delete(step.slot);
           if (step.slot in frame.slots) {
             if (definition.prefill !== false || answered) {
-              if (!step.verify || (await this.verify(frame, step.verify, step.slot))) { // ← prefilled = step skipped
+              if ((!unchecked || this.check(frame, definition)) && (!step.verify || (await this.verify(frame, step.verify, step.slot)))) { // ← prefilled = step skipped
                 frame.failures.delete(frame.step);
                 frame.step++;
                 continue;
@@ -258,13 +291,13 @@ export class FlowEngine {
           this.stack.pop();
           if (step.message) this.output(step.message);
           const carried = Object.fromEntries(step.carry.filter((name) => name in frame.slots).map((name) => [name, frame.slots[name]!]));
-          await this.push(step.flow, carried, frame.called); // linked from a called flow = still called
+          await this.push(step.flow, carried, frame.called, frame.unchecked); // linked from a called flow = still called
           returning = false;
           continue;
         }
         case "call":
           frame.step++; // where the caller goes on when the called flow ends
-          await this.push(step.flow, frame.slots, true, text);
+          await this.push(step.flow, frame.slots, true, frame.unchecked);
           continue;
       }
     }
@@ -274,6 +307,21 @@ export class FlowEngine {
     const result = await action({ ...frame.slots });
     if (result?.setSlots) setSlots(frame.slots, result.setSlots);
     for (const text of [result?.say ?? []].flat()) this.output(text);
+  }
+
+  /** Checks a value read while another flow was asking; a turned-down value is cleared. */
+  private check(frame: Frame, definition: SlotDefinition): boolean {
+    const value = frame.slots[definition.name]!;
+    const valid = this.hasType(definition, value, frame.slots);
+    const error = valid ? definition.validate?.(value, frame.slots) : null;
+    if (valid && !error) return true;
+    delete frame.slots[definition.name];
+    if (error) {
+      this.output(error);
+      frame.noAutoSelect.add(definition.name);
+      countFailure(frame);
+    }
+    return false;
   }
 
   /** Runs a collect step's `verify`; the value is turned down when the action cleared the slot. */

@@ -171,7 +171,9 @@ flows:
   including the ones it cleared. A slot name means the same slot in both flows.
 - `END` in the called flow, including `on_exhausted`, ends only the called flow. The caller learns from the slots how
   the call went, so check them right after the `call`, as above.
-- The called flow takes values from the customer's message that led to the call, like a flow the message started.
+- Every message is read once for the open slots of the flow the customer started, the flows it called and the flows it
+  will call later. "555-0100, Friday" as the answer to the phone question also fills the booking's `day`. `rejections`
+  of another flow's slot run when that flow reaches its `collect` step, as in Rasa.
 - Cancelling inside a called flow cancels the flow the customer started, and a task switch parks both flows.
 - A called flow can call another flow, but a flow can't lead back to itself through calls and links.
 
@@ -279,5 +281,9 @@ Compile your flows in a test, and CI catches typos before a customer does.
 - **Cancel inside a called flow** cancels the flow the customer started, together with the flows it called.
 - **`ask_before_filling: true`** means the bot always asks itself: it never takes the value from an earlier message, and
   asks again even for a value that was carried over or answered on an earlier pass.
+- **The same slot in several flows**: when a called flow and its caller collect the same slot with different
+  `description`s, the NLU sees only the one from the nearest flow that may fill it early, not all of them.
+- **Correcting a slot**: a slot that is already filled is not looked for again, so "actually, on Wednesday" doesn't change
+  it.
 - **Not supported**: flow guards other than `if: False`, `domain.yml` features beyond the slots and responses above,
   response variations and buttons, and conditions beyond the table above.

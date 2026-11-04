@@ -6,6 +6,31 @@ All notable changes for users of `@gallas-ai/flow-engine`. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- ⚠️ **`Nlu.extract` during a `call`**: `flow` is now the flow the customer started, not the called flow, and `wanted`
+  also holds the open slots of the other flows in the call. It breaks your NLU if it decides by `flow` or expects `wanted`
+  to belong to `flow`. Each message now makes one `extract` call, also at the start of a flow that calls another.
+  A choice slot in `wanted` can have no options yet, so don't send an empty `enum`.
+  [Docs](https://github.com/gallas-ai/flow-engine/blob/main/docs/nlu.md#which-method-is-called-when)
+- **"Sorry, I didn't quite get that" only when nothing was understood.** An answer that fills another slot, but not the
+  one the bot asked about, no longer gets this line: the bot just asks again, and it doesn't count as a failed attempt.
+  This applies to all flows.
+
+### Fixed
+
+- **Values lost during a `call`.** When the customer answered a called flow's question and added something for the
+  caller ("555-0100, Friday"), the bot forgot it and asked again. Now every message is read for the whole call, also for
+  flows that start later, and the value survives even when the called flow turns the answer down. `validate` and
+  `rejections` of another flow's slot run when that flow reaches its `collect` step.
+  [Code](https://github.com/gallas-ai/flow-engine/blob/main/docs/flows-in-code.md#calling-a-flow) ·
+  [YAML](https://github.com/gallas-ai/flow-engine/blob/main/docs/yaml.md#calling-a-flow)
+
+### Docs & examples
+
+- [examples/appointments](https://github.com/gallas-ai/flow-engine/tree/main/examples/appointments) shows one answer
+  filling both the verification and the booking.
+
 ## [0.3.0] - 2026-11-01
 
 ### Added

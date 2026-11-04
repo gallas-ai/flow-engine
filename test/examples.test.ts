@@ -121,6 +121,19 @@ describe.each([
     expect(engine.snapshot()[0]!.slots).toMatchObject({ patient_id: "P-17", patient_name: "Jane" });
   });
 
+  it("takes the day from the answer that ends the verification", async () => {
+    const { send } = create();
+    await send("book me in");
+    expect(await send("555-0100, Friday please")).toEqual(["Thank you, Jane, you are verified.", "Done: you're booked for Friday."]);
+  });
+
+  it("keeps the day when the verification turns the number down", async () => {
+    const { send } = create();
+    await send("book me in");
+    expect(await send("555-0199, Friday please")).toEqual([NOT_FOUND, "What is your phone number?"]);
+    expect(await send("555-0100")).toEqual(["Thank you, Jane, you are verified.", "Done: you're booked for Friday."]);
+  });
+
   it("ends the caller when the verification gives up", async () => {
     const { engine, send } = create();
     await send("book me in");

@@ -16,7 +16,7 @@ interface Nlu {
 |---|---|---|
 | `route` | Which flow does this message start? `flows` lists each flow's `name`, `title` and `description`, except flows with `routable: false` (YAML `if: False`) | The flow's `name`, or `null` to just answer the message |
 | `classifyTurn` | While the bot waits for an answer to `question`: what is this message? | `answer`, `step_question` ("why do you need it?"), `digression` (an unrelated question), `task_switch` (wants something else) or `cancel` |
-| `extract` | Which of the `wanted` slots does the message contain? | `{ values, notAmongOptions }`: typed values (`true` / `false` for bool slots, numbers for number slots), and the choice slots for which the customer named something that isn't offered |
+| `extract` | Which of the `wanted` slots does the message contain? `flow` is the flow the customer started, and `wanted` also holds the open slots of the flows it calls | `{ values, notAmongOptions }`: typed values (`true` / `false` for bool slots, numbers for number slots), and the choice slots for which the customer named something that isn't offered |
 | `choose` | Which of the offered `options` did the customer pick ("the second one", "the cheaper one")? | The option's `value`, or `null` |
 | `answer` | Answer a free question. `step` holds the waiting question and its `help` when the customer asks about the step | The answer text |
 
@@ -33,7 +33,9 @@ The conversation from the README, with the NLU calls behind each message:
 | wait, what is your return policy? | `classifyTurn` → `digression`, `extract` → nothing, `answer` → the policy | The bot answers, then asks "Return the mug?" again |
 | yes | `classifyTurn` → `answer`, `extract` → `{ confirm: true }` | The action runs |
 
-`route` is called only when no flow waits for an answer. `choose` is called on top of `extract` when the waiting slot is
+`route` is called only when no flow waits for an answer. `extract` is called once per message, also during a `call`.
+A choice slot in `wanted` can have no options yet when they depend on slots that aren't known, so leave its values open
+instead of sending an empty `enum`. `choose` is called on top of `extract` when the waiting slot is
 a choice with more than one option.
 
 ## Example: an NLU with Claude
@@ -76,8 +78,8 @@ function describeSlot(definition: SlotDefinition, slots: Slots): string {
 function slotSchema(definition: SlotDefinition, slots: Slots) {
   if (definition.type === "bool") return { type: "boolean" };
   if (definition.type === "number") return { type: "number" };
-  if (definition.type === "choice") return { type: "string", enum: definition.options!(slots).map((option) => option.value) };
-  return { type: "string" };
+  const options = definition.options?.(slots).map((option) => option.value) ?? [];
+  return options.length ? { type: "string", enum: options } : { type: "string" }; // the engine checks a choice without options later
 }
 
 export const claudeNlu: Nlu = {

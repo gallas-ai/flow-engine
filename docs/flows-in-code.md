@@ -124,9 +124,13 @@ How a call behaves:
 - **The caller checks the result.** An `END` in the called flow, including `onExhausted` and a choice slot without
   options, ends only the called flow, and the caller continues. The called flow reports how it went through its slots
   (`patient_id` is set or not), and the caller checks them right after the `call`.
-- **Prefill.** When the call runs in the same turn as a customer's message, the called flow takes values from that
-  message, like a flow the message started. "Book me in for Friday, my number is 555-0100" fills both `day` and
-  `phone`. A slot with `prefill: false` is still asked, even when the caller already holds it.
+- **One message fills all the flows.** Every message is read once for the open slots of the whole chain: the flow the
+  customer started, the flows it called, and the flows it will call later. "Book me in for Friday, my number is
+  555-0100" fills both `day` and `phone`, and so does "555-0100, Friday" as the answer to the phone question, even if
+  the number then turns out to be wrong. A `prefill: false` step still asks, even when the value is already known.
+- **A value for another flow is checked at its own step.** `validate` and `options` run for that value only when the
+  flow reaches the slot's `collect` step, so the customer doesn't hear about the day during the verification. A value
+  turned down there counts toward `maxAttempts`. `notAvailable` isn't said for another flow's slot.
 - **No "Back to…" line.** When the called flow ends, the caller goes on with its next question as if it were its own.
 - **Cancel and task switch act on the whole task.** To the customer, the called flow is part of the task they started.
   A cancel inside the called flow cancels its callers too, and `messages.flowCancelled` names the flow the customer

@@ -125,7 +125,7 @@ from a clone of the repository with `npm run example -- <example> [yaml|code]`.
 | Example | What it shows |
 |---|---|
 | [verification](https://github.com/gallas-ai/flow-engine/tree/main/examples/verification) | Checking an answer against a CRM with `verify`, limited retries with `max_attempts`, giving up with `on_exhausted` |
-| [appointments](https://github.com/gallas-ai/flow-engine/tree/main/examples/appointments) | Two flows sharing one verification with `call`, a flow hidden from routing with `if: False`, checking the slots a call hands back, cancelling a called flow |
+| [appointments](https://github.com/gallas-ai/flow-engine/tree/main/examples/appointments) | Two flows sharing one verification with `call`, a flow hidden from routing with `if: False`, checking the slots a call hands back, one answer filling several flows, cancelling a called flow |
 | [delivery-reschedule](https://github.com/gallas-ai/flow-engine/tree/main/examples/delivery-reschedule) | One flow in English, Czech and Spanish: `responses` per language, translated `messages`, one `Nlu` per language, translated choice-option labels |
 
 ## Documentation

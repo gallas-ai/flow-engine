@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { END, FlowEngine, type ActionResult, type Flow, type FlowEngineEvent, type FlowSummary, type Messages, type Nlu, type Option, type Slots } from "../src/index.ts";
 
 // ───────────────────────── test flows: a small shop ─────────────────────────
@@ -382,6 +382,122 @@ describe("call", () => {
       { flow: "verify", called: true },
     ]);
     expect(await send("1980")).toEqual(["Verified.", "Which day?"]);
+  });
+
+  describe("one read of a message for the whole call chain", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    const dayStep = booking.steps.at(2)!;
+    const bookingWithDay = (day: Partial<Flow["slots"][number]>, step: Partial<Extract<Flow["steps"][number], { kind: "collect" }>> = {}): Flow => ({
+      ...booking,
+      slots: [{ ...booking.slots[0]!, ...day }],
+      steps: booking.steps.map((original) => (original === dayStep ? { ...original, ...step } as Flow["steps"][number] : original)),
+    });
+
+    it("takes the caller's slot from the answer that ends the called flow, with one NLU call", async () => {
+      const { send } = create();
+      await send("book an appointment");
+      const extract = vi.spyOn(keywordNlu, "extract");
+      expect(await send("1980, tuesday")).toEqual(["Verified.", "Booked tuesday for patient P1."]);
+      expect(extract).toHaveBeenCalledTimes(1);
+    });
+
+    it("reads the opening message once, also for the flows it calls", async () => {
+      const extract = vi.spyOn(keywordNlu, "extract");
+      const { send } = create();
+      expect(await send("book tuesday, born 1980")).toEqual(["Verified.", "Booked tuesday for patient P1."]);
+      expect(extract).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps the caller's slot when the called flow turns the answer down", async () => {
+      const { send } = create();
+      await send("book an appointment");
+      expect(await send("1970, tuesday")).toEqual(["Unknown patient.", "What is your year of birth?"]);
+      expect(await send("1980")).toEqual(["Verified.", "Booked tuesday for patient P1."]);
+    });
+
+    it("forgets the caller's slot when the call chain is cancelled", async () => {
+      const { engine, send } = create();
+      await send("book an appointment");
+      await send("1970, tuesday");
+      await send("cancel it");
+      expect(engine.snapshot()).toEqual([]);
+      await send("book an appointment");
+      expect(await send("1980")).toEqual(["Verified.", "Which day?"]);
+    });
+
+    it("gives the NLU the flow the customer started", async () => {
+      const { send } = create();
+      await send("book an appointment");
+      const extract = vi.spyOn(keywordNlu, "extract");
+      await send("1980");
+      expect(extract.mock.calls[0]![0].name).toBe("booking");
+      expect(extract.mock.calls[0]![1].map((definition) => definition.name)).toEqual(["birth_year", "day"]);
+      expect(extract.mock.calls[0]![4]).toBe("What is your year of birth?");
+    });
+
+    it("fills a slot of a flow that hasn't been called yet", async () => {
+      const early: Flow = {
+        ...booking,
+        slots: [...booking.slots, { name: "defect", type: "text", description: "anything to mention", question: () => "Anything to mention?" }],
+        steps: [{ kind: "collect", slot: "day" }, { kind: "collect", slot: "defect" }, { kind: "call", flow: "verify" }, { kind: "say", text: (slots) => `Booked ${slots.day}.` }],
+      };
+      const { send } = create({ booking: early });
+      expect(await send("book an appointment")).toEqual(["Which day?"]);
+      expect(await send("tuesday, born 1980")).toEqual(["Anything to mention?"]);
+      expect(await send("it leaks")).toEqual(["Verified.", "Booked tuesday."]);
+    });
+
+    it("doesn't take a prefill: false slot that no flow in the chain may fill early", async () => {
+      const consent: Flow = { ...booking, slots: [confirmSlot(() => "Booking.")], steps: [{ kind: "call", flow: "verify" }, { kind: "collect", slot: "confirm" }, { kind: "say", text: () => "Done." }] };
+      const { send } = create({ booking: consent });
+      await send("book an appointment");
+      expect(await send("1980, yes")).toEqual(["Verified.", "Booking. Submit?"]);
+    });
+
+    it("takes a slot one flow may fill early, and the prefill: false step still asks", async () => {
+      const asking: Flow = { name: "asking", title: "Consent", routable: false, slots: [confirmSlot(() => "Booking.")], steps: [{ kind: "collect", slot: "confirm" }] };
+      const caller: Flow = { ...booking, slots: [{ ...confirmSlot(() => "Booking."), prefill: undefined }], steps: [{ kind: "call", flow: "asking" }, { kind: "say", text: () => "Done." }] };
+      const { send, events } = create({ booking: caller, asking });
+      expect(await send("book it, yes")).toEqual(["Booking. Submit?"]);
+      expect(events).toContainEqual({ type: "slotsPrefilled", values: { confirm: true }, notAmongOptions: [] });
+    });
+
+    it("checks a value for another flow only when that flow's collect step is reached", async () => {
+      const { send } = create({ booking: bookingWithDay({ validate: (value) => (value === "tuesday" ? "Closed on Tuesdays." : null) }) });
+      await send("book an appointment");
+      expect(await send("1970, tuesday")).toEqual(["Unknown patient.", "What is your year of birth?"]);
+      expect(await send("1980")).toEqual(["Verified.", "Closed on Tuesdays.", "Which day?"]);
+    });
+
+    it("counts a value turned down at its collect step toward maxAttempts", async () => {
+      const { engine, send } = create({ booking: bookingWithDay({ validate: () => "Closed." }, { maxAttempts: 1 }) });
+      await send("book an appointment");
+      expect(await send("1980, tuesday")).toEqual(["Verified.", "Closed."]);
+      expect(engine.snapshot()).toEqual([]);
+    });
+
+    it("checks a choice for another flow against the options of its collect step", async () => {
+      const offered = bookingWithDay({ type: "choice", options: (slots) => ("patient_id" in slots ? [{ value: "tuesday", label: "Tuesday" }, { value: "friday", label: "Friday" }] : []) });
+      const { send } = create({ booking: offered });
+      await send("book an appointment");
+      expect(await send("1980, tuesday")).toEqual(["Verified.", "Booked tuesday for patient P1."]);
+    });
+
+    it("asks the question again, without an apology, when the answer holds only another slot", async () => {
+      const { send } = create();
+      await send("book an appointment");
+      expect(await send("tuesday")).toEqual(["What is your year of birth?"]);
+      expect(await send("1980")).toEqual(["Verified.", "Booked tuesday for patient P1."]);
+    });
+
+    it("asks without an apology when the answer holds another slot of the same flow", async () => {
+      const { send } = createEngine();
+      await send("I want a refund");
+      expect(await send("unwanted")).toEqual(["What do you want to return?\n   1) Mug\n   2) Old mug"]);
+    });
   });
 
   it("hides a flow that isn't routable from the NLU", async () => {

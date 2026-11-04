@@ -32,6 +32,15 @@ bot:      I couldn't find a patient with this phone number.
           What is your phone number?
 customer: forget it
 bot:      Understood, "Book appointment" is cancelled.   ← cancels the booking, not only the verification
+
+customer: Book me in
+bot:      What is your phone number?
+customer: 555-0199, Friday please                    ← one answer, read for both flows
+bot:      I couldn't find a patient with this phone number.
+          What is your phone number?
+customer: 555-0100
+bot:      Thank you, Jane, you are verified.
+          Done: you're booked for Friday.            ← the day survived the turned-down number
 ```
 
 The example comes in two versions that behave the same:
@@ -50,6 +59,7 @@ What the example uses:
 |---|---|
 | `call: verify_patient` | Runs the verification, then continues with the next step of the calling flow |
 | Shared slots | The verification starts with the caller's slots, and all its slots go back to the caller when it ends: here `patient_id` and `patient_name`, which its action set |
+| One read of a message | An answer during the verification also fills the booking's `day`, even when the verification turns the number down |
 | Checking after the call | An `END` in the verification ends only the verification. The caller checks `patient_id` and ends itself when it isn't set |
 | `if: False` | Hides `verify_patient` from routing: "verify me" never starts it on its own, only a `call` does |
 | Cancel | "forget it" during the verification cancels the booking: the customer started the booking, not the verification |
