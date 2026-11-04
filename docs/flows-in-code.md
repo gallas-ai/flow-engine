@@ -73,7 +73,7 @@ await engine.handle("I want to return the mug");
 | Step | What it does |
 |---|---|
 | `{ kind: "collect", slot }` | Asks for the slot. Skipped when the slot is already known, e.g. from the first message |
-| `{ kind: "collect", slot, verify, maxAttempts, onExhausted }` | `verify` is an action run as soon as the slot is filled; when it clears the slot, the value is turned down and the question asked again. After `maxAttempts` turned-down values (by `verify` or `validate`) the flow jumps to `onExhausted` (a step id, END by default). See [examples/verification](../examples/verification/README.md) |
+| `{ kind: "collect", slot, verify, maxAttempts, onExhausted }` | `verify` is an action run as soon as the slot is filled; when it clears the slot, the value is turned down and the question asked again. After `maxAttempts` turned-down values (by `verify` or `validate`) the flow jumps to `onExhausted` (a step id, END by default). A `verify` that also returns `uncounted: true` asks again without counting the value. See [examples/verification](../examples/verification/README.md) |
 | `{ kind: "say", text }` | Says `text(slots)` |
 | `{ kind: "action", run }` | Runs your code (sync or async) and waits for it. It returns `{ say?, setSlots? }`: what to say and which slots to store. `null` in `setSlots` clears a slot |
 | `{ kind: "set", values }` | Stores fixed values in slots; `null` clears one |

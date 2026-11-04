@@ -24,6 +24,17 @@ bot:      I couldn't verify this e-mail address.     ← verify cleared email = 
 customer: paul@example.com
 bot:      I couldn't verify this e-mail address.     ← 2nd failed attempt = max_attempts
           Sorry, I couldn't verify you. Please contact our support.   ← on_exhausted
+
+customer: I want to verify myself
+bot:      What is your e-mail address?
+customer: office@example.com
+bot:      Several customers share this e-mail address. Please give me your own.   ← uncounted: not an attempt
+          What is your e-mail address?
+customer: peter@example.com
+bot:      I couldn't verify this e-mail address.     ← only the 1st failed attempt
+          What is your e-mail address?
+customer: jane@example.com
+bot:      Thank you, Jane, you are verified.
 ```
 
 The example comes in two versions that behave the same:
@@ -46,6 +57,9 @@ All of it is one `collect` step with three keys:
 
 An answer the engine didn't understand doesn't count as an attempt; the `notUnderstood` and `stillNotUnderstood`
 messages still handle that. Neither do digressions or questions about the step.
+
+The action decides about one more case: a value it turns down with `uncounted: true` doesn't count either. Use it when
+the customer only has to be more precise, like the shared mailbox here.
 
 ## YAML
 
@@ -84,6 +98,10 @@ import { parse } from "yaml";
 import { compileFlows, FlowEngine, type Action, type ActionResult } from "@gallas-ai/flow-engine";
 
 const verifyEmail: Action = async (slots): Promise<ActionResult> => {
+  if (await crm.isSharedEmail(slots.email)) {
+    // cleared and uncounted = ask again, not a failed attempt
+    return { say: "Several customers share this e-mail address. Please give me your own.", setSlots: { email: null }, uncounted: true };
+  }
   const name = await crm.findCustomerName(slots.email);
   return name
     ? { setSlots: { customer_name: name } } // email stays set = verified

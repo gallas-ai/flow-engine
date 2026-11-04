@@ -85,7 +85,7 @@ Semantics that are easy to break:
   instead of starting a copy. A `call` always pushes a frame, because several chains may call the same flow.
 - `verify` on a collect step is an action. It turns a value down by **clearing the slot** (`setSlots: { x: null }`).
   Turned-down values from `verify` or `validate` count toward `maxAttempts`, after which the flow jumps to `onExhausted`
-  (default `END`).
+  (default `END`), unless the `verify` action also returns `uncounted: true`.
 - Actions receive a copy of the slots and change them only through `ActionResult.setSlots` (`null` deletes a slot).
 
 ## Tests

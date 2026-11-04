@@ -8,6 +8,11 @@ All notable changes for users of `@gallas-ai/flow-engine`. The format follows
 
 ### Added
 
+- **`uncounted` in `ActionResult`**: a `verify` action that clears the slot and returns `uncounted: true` asks again without
+  counting the value toward `maxAttempts`, e.g. for a name several customers share. You can drop your own attempt counter
+  if you kept one for this reason.
+  [Code](https://github.com/gallas-ai/flow-engine/blob/main/docs/flows-in-code.md#steps) ·
+  [YAML](https://github.com/gallas-ai/flow-engine/blob/main/docs/yaml.md#steps)
 - **`persistedSlots` on a flow** (YAML: `persisted_slots`): the listed slots go to the parked flows when the flow leaves,
   at its end, on a cancel or on a `link`. A parked question whose slot got a value this way isn't asked again, so a
   customer who verifies during another task isn't asked to verify again when the first task resumes. The parked `collect`
@@ -52,6 +57,8 @@ All notable changes for users of `@gallas-ai/flow-engine`. The format follows
 
 ### Docs & examples
 
+- [examples/verification](https://github.com/gallas-ai/flow-engine/tree/main/examples/verification) shows a value that
+  doesn't count as an attempt.
 - [examples/appointments](https://github.com/gallas-ai/flow-engine/tree/main/examples/appointments) shows one answer
   filling both the verification and the booking, and a parked booking that isn't asked again for the phone number.
 

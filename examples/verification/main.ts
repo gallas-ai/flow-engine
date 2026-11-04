@@ -14,7 +14,10 @@ const variants: Record<"yaml" | "code", () => Promise<Record<string, Flow>>> = {
 };
 
 /** What the customer says; the bot's lines come from the engine. */
-const conversations = [["I want to verify myself", "peter@example.com", "paul@example.com"]];
+const conversations = [
+  ["I want to verify myself", "peter@example.com", "paul@example.com"],
+  ["I want to verify myself", "office@example.com", "peter@example.com", "jane@example.com"],
+];
 
 const selected = selectVariants(["yaml", "code"] as const);
 for (const variant of selected) {

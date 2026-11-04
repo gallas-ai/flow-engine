@@ -127,6 +127,8 @@ A `collect` step can also have:
   clears the slot (`email: null`) turns the value down, and the question is asked again.
 - `max_attempts` – how many turned-down values the step accepts: those cleared by `verify` and answers rejected by
   `rejections`. Answers the engine didn't understand don't count.
+- `uncounted: true` in what the `verify` action returns – this cleared value doesn't count toward `max_attempts`. Use it
+  when the customer only has to be more precise, e.g. a name several customers share.
 - `on_exhausted` – where the flow goes after `max_attempts` turned-down values: a step id or a list of steps, like `then`.
   Without it the flow ends.
   ```yaml

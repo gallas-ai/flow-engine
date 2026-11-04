@@ -5,7 +5,7 @@
 // it gets an `Nlu` implementation injected, so it runs just as well with a fake keyword NLU in tests.
 import { defaultMessages } from "./messages.ts";
 import { END } from "./types.ts";
-import type { Action, Flow, FlowEngineEvent, FlowSummary, FrameSnapshot, Messages, Nlu, SlotDefinition, SlotValue, Slots } from "./types.ts";
+import type { Action, ActionResult, Flow, FlowEngineEvent, FlowSummary, FrameSnapshot, Messages, Nlu, SlotDefinition, SlotValue, Slots } from "./types.ts";
 
 type Frame = {
   flow: Flow;
@@ -341,10 +341,11 @@ export class FlowEngine {
     return [...(flow.persistedSlots ?? []), ...flow.steps.flatMap((step) => (step.kind === "call" ? this.persistedSlots(this.flows[step.flow]!) : []))];
   }
 
-  private async run(frame: Frame, action: Action): Promise<void> {
+  private async run(frame: Frame, action: Action): Promise<ActionResult | void> {
     const result = await action({ ...frame.slots });
     if (result?.setSlots) setSlots(frame.slots, result.setSlots);
     for (const text of [result?.say ?? []].flat()) this.output(text);
+    return result;
   }
 
   /** Checks a value read while another flow was asking; a turned-down value is cleared. */
@@ -364,9 +365,9 @@ export class FlowEngine {
 
   /** Runs a collect step's `verify`; the value is turned down when the action cleared the slot. */
   private async verify(frame: Frame, action: Action, slot: string): Promise<boolean> {
-    await this.run(frame, action);
+    const result = await this.run(frame, action);
     if (slot in frame.slots) return true;
-    countFailure(frame);
+    if (!result?.uncounted) countFailure(frame);
     frame.noAutoSelect.add(slot); // a single option that failed must not be picked again without asking
     return false;
   }

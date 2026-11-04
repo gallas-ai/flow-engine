@@ -34,7 +34,12 @@ export type SlotDefinition = {
 };
 
 /** What an action says and which slots it changes; null deletes a slot. */
-export type ActionResult = { say?: string | string[]; setSlots?: Record<string, SlotValue | null> };
+export type ActionResult = {
+  say?: string | string[];
+  setSlots?: Record<string, SlotValue | null>;
+  /** For a collect step's `verify` that clears the slot: this turned-down value doesn't count toward `maxAttempts`. */
+  uncounted?: boolean;
+};
 
 /** Code run by an `action` step; it gets a copy of the slots. */
 export type Action = (slots: Slots) => ActionResult | void | Promise<ActionResult | void>;

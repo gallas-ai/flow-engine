@@ -25,6 +25,7 @@ const ASK = "What is your e-mail address?";
 const NOT_FOUND = "I couldn't verify this e-mail address.";
 const FAILED = "Sorry, I couldn't verify you. Please contact our support.";
 const VERIFIED = "Thank you, Jane, you are verified.";
+const SHARED = "Several customers share this e-mail address. Please give me your own.";
 
 describe.each([
   ["YAML", () => compileFlows(parse(source), registry)],
@@ -59,6 +60,14 @@ describe.each([
     expect(await send("peter@example.com")).toEqual([NOT_FOUND, FAILED]);
   });
 
+  it("doesn't count a value turned down as uncounted", async () => {
+    const { send } = createEngine(flows());
+    await send("I want to verify myself");
+    expect(await send("office@example.com")).toEqual([SHARED, ASK]);
+    expect(await send("peter@example.com")).toEqual([NOT_FOUND, ASK]);
+    expect(await send("jane@example.com")).toEqual([VERIFIED]);
+  });
+
   it("verifies an e-mail from the opening message, and counts it", async () => {
     expect(await createEngine(flows()).send("verify me, jane@example.com")).toEqual([VERIFIED]);
     const { send } = createEngine(flows());
@@ -90,6 +99,21 @@ describe("verify, max_attempts and on_exhausted", () => {
     expect(withCollect({ maxAttempts: 1.5 })).toThrow("maxAttempts of email must be a whole number of at least 1");
     expect(withCollect({ onExhausted: "failed" })).toThrow("onExhausted of email needs maxAttempts");
     expect(withCollect({ maxAttempts: 2, onExhausted: "failed" })).toThrow("onExhausted to unknown step failed");
+  });
+
+  it("gives up on a counted value after any number of uncounted ones", async () => {
+    let uncounted = true;
+    const flow: Flow = {
+      ...verifyCustomer,
+      steps: [{ kind: "collect", slot: "email", verify: () => ({ setSlots: { email: null }, uncounted }), maxAttempts: 1 }, { kind: "say", text: () => "Verified." }],
+    };
+    const { engine, send } = createEngine({ verify_customer: flow });
+    await send("I want to verify myself");
+    expect(await send("a@b.com")).toEqual([ASK]);
+    expect(await send("c@d.com")).toEqual([ASK]);
+    uncounted = false;
+    expect(await send("e@f.com")).toEqual([]);
+    expect(engine.snapshot()).toEqual([]);
   });
 
   it("doesn't pick a single option again after it failed verification", async () => {
