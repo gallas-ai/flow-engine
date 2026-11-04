@@ -6,6 +6,8 @@ All notable changes for users of `@gallas-ai/flow-engine`. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-04
+
 ### Added
 
 - **`uncounted` in `ActionResult`**: a `verify` action that clears the slot and returns `uncounted: true` asks again without
@@ -106,6 +108,7 @@ All notable changes for users of `@gallas-ai/flow-engine`. The format follows
 
 See the [0.2.0 release](https://github.com/gallas-ai/flow-engine/releases/tag/v0.2.0) for 0.2.0 and older versions.
 
-[Unreleased]: https://github.com/gallas-ai/flow-engine/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/gallas-ai/flow-engine/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/gallas-ai/flow-engine/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/gallas-ai/flow-engine/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/gallas-ai/flow-engine/releases/tag/v0.2.0
