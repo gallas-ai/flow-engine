@@ -392,6 +392,16 @@ describe("call", () => {
     expect(await send("1980")).toEqual(["Verified.", "Booked tuesday for patient P1.", "Back to Address change: What is the new address?"]);
   });
 
+  it("doesn't take the message that resumes a parked flow for the answer to its question", async () => {
+    const { send } = create();
+    await send("book an appointment");
+    await send("wait, change my address");
+    const extract = vi.spyOn(keywordNlu, "extract");
+    await send("book an appointment");
+    expect(extract.mock.lastCall![4]).toBeUndefined();
+    extract.mockRestore();
+  });
+
   it("resumes a parked flow on a link to it, without a resume line and with the carried slots", async () => {
     const linking: Flow = {
       name: "address",

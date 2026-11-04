@@ -104,6 +104,7 @@ export class FlowEngine {
         if (flow && !chain.some((frame) => frame.flow.name === flow)) {
           this.output(this.messages.flowParked(chain[0]!.flow.title)); // the whole call chain waits
           if (!this.resumeParked(flow)) return this.start(flow, text);
+          this.top!.waitingFor = undefined; // the message isn't an answer to the question the flow was waiting on
           await this.fill(this.top!, text, true);
           return this.advance(true);
         }
