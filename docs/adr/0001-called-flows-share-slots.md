@@ -20,5 +20,7 @@ syntax.
 
 - Two flows that use the same slot name for different things clash when one calls the other. Slot names in reusable
   flows must be chosen with that in mind.
+- A called flow can't use a `link`, because a `link` takes only the listed slots and would drop the rest of the
+  caller's. Rasa rejects this combination too.
 - `END` inside a called flow ends only the called flow; the caller learns how it went from the slots (e.g. `patient_id`
   is not set) and must check them.

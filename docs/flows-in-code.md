@@ -85,7 +85,8 @@ await engine.handle("I want to return the mug");
 Any step can have an `id` for `goto` to jump to. The flow also ends after its last step.
 
 When the engine is created, it checks the flows and throws on a broken reference: a step that collects an unknown slot,
-a `goto` to an unknown step, a `link` or `call` to an unknown flow, or a `call` that can lead back to its own flow.
+a `goto` to an unknown step, a `link` or `call` to an unknown flow, a `call` that can lead back to its own flow, or a
+`call` to a flow that uses a `link`.
 
 ## Calling a flow
 
@@ -139,9 +140,11 @@ How a call behaves:
   at the called flow's question. A task switch to a flow that is already running in the chain ("I want to book an
   appointment" during the booking's verification) doesn't start it again: the bot answers the message and asks the
   waiting question again.
-- **Nesting.** A called flow can call another flow. A `link` in a called flow replaces only the called flow, and the
-  caller continues when the linked flow ends. A flow can't call itself, directly or through other calls and links: the
+- **Nesting.** A called flow can call another flow, but a flow can't call itself, directly or through other calls: the
   engine throws when it is created.
+- **A called flow can't use a `link`.** A `link` ends the flow for good, and a `call` has to come back. The engine
+  throws when it is created, even if the call would never reach that `link`. To reuse part of a flow that has a `link`,
+  move the shared steps to a flow of their own, call it, and keep the `link` in the caller.
 
 `routable: false` hides a flow from `Nlu.route`, so a customer's message never starts it, only a `call`, a `link` or
 `engine.start` from your code. If the NLU returns the flow's name anyway, the engine treats it as no flow and just

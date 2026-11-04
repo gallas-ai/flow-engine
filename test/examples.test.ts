@@ -162,6 +162,9 @@ describe("call and if: False", () => {
     );
     expect(compileWith((flows) => (flows.book_appointment.steps[0].call = ""))).toThrow("flows.book_appointment.steps[0].call: must be a non-empty string");
     expect(compileWith((flows) => (flows.book_appointment.steps[0].call = "verify"))).toThrow("Flow book_appointment: calls unknown flow verify");
+    expect(compileWith((flows) => flows.verify_patient.steps.push({ link: "cancel_appointment" }))).toThrow(
+      "Flow book_appointment: calls verify_patient, which uses a link",
+    );
     expect(compileWith((flows) => flows.verify_patient.steps.push({ call: "cancel_appointment" }))).toThrow(
       "Flow verify_patient: calls cancel_appointment, which leads back to verify_patient",
     );

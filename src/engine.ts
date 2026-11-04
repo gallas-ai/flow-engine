@@ -291,7 +291,7 @@ export class FlowEngine {
           this.stack.pop();
           if (step.message) this.output(step.message);
           const carried = Object.fromEntries(step.carry.filter((name) => name in frame.slots).map((name) => [name, frame.slots[name]!]));
-          await this.push(step.flow, carried, frame.called, frame.unchecked); // linked from a called flow = still called
+          await this.push(step.flow, carried, false, new Set());
           returning = false;
           continue;
         }
@@ -405,19 +405,20 @@ function validateFlows(flows: Record<string, Flow>): void {
       if (step.kind === "call") {
         if (!flows[step.flow]) fail(`calls unknown flow ${step.flow}`);
         else if (reaches(flows, step.flow, key)) fail(`calls ${step.flow}, which leads back to ${key} – a call can't repeat endlessly`);
+        else if (flows[step.flow]!.steps.some((called) => called.kind === "link")) fail(`calls ${step.flow}, which uses a link – a called flow can't link, because a link ends the flow and a call has to come back`);
       }
     }
   }
 }
 
-/** Can `from` get to `to` through calls and links? */
+/** Can `from` get to `to` through calls? */
 function reaches(flows: Record<string, Flow>, from: string, to: string): boolean {
   const seen = new Set<string>();
   const visit = (name: string): boolean => {
     if (name === to) return true;
     if (seen.has(name)) return false;
     seen.add(name);
-    return (flows[name]?.steps ?? []).some((step) => (step.kind === "call" || step.kind === "link") && visit(step.flow));
+    return (flows[name]?.steps ?? []).some((step) => step.kind === "call" && visit(step.flow));
   };
   return visit(from);
 }

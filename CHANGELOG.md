@@ -8,6 +8,12 @@ All notable changes for users of `@gallas-ai/flow-engine`. The format follows
 
 ### Changed
 
+- ⚠️ **A called flow can't use a `link`.** `new FlowEngine` now throws when a flow calls a flow that has a `link` step,
+  even in a branch the call would never reach. This breaks your flows if they combine the two; they lost the caller's
+  slots before. Move the shared steps to a flow of their own, call it, and keep the `link` in the caller. Rasa has the
+  same rule.
+  [Code](https://github.com/gallas-ai/flow-engine/blob/main/docs/flows-in-code.md#calling-a-flow) ·
+  [YAML](https://github.com/gallas-ai/flow-engine/blob/main/docs/yaml.md#calling-a-flow)
 - ⚠️ **`Nlu.extract` during a `call`**: `flow` is now the flow the customer started, not the called flow, and `wanted`
   also holds the open slots of the other flows in the call. It breaks your NLU if it decides by `flow` or expects `wanted`
   to belong to `flow`. Each message now makes one `extract` call, also at the start of a flow that calls another.

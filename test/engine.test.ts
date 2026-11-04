@@ -373,10 +373,19 @@ describe("call", () => {
     expect(engine.snapshot().map((frame) => frame.flow)).toEqual(["booking", "verify"]);
   });
 
-  it("keeps a flow linked from a called flow in the call chain", async () => {
-    const gate: Flow = { name: "gate", title: "Gate", routable: false, slots: [], steps: [{ kind: "link", flow: "verify", carry: [] }] };
-    const { engine, send } = create({ gate, booking: { ...booking, steps: [{ kind: "call", flow: "gate" }, ...booking.steps.slice(1)] } });
-    await send("book an appointment");
+  it("rejects a called flow that uses a link when the engine is created", () => {
+    const callingGate = (steps: Flow["steps"]) => () =>
+      create({ gate: { name: "gate", title: "Gate", routable: false, slots: [], steps }, booking: { ...booking, steps: [{ kind: "call", flow: "gate" }, ...booking.steps.slice(1)] } });
+    const rejected = "Flow booking: calls gate, which uses a link – a called flow can't link, because a link ends the flow and a call has to come back";
+    expect(callingGate([{ kind: "link", flow: "verify", carry: [] }])).toThrow(rejected);
+    // also a link that this call would never reach
+    expect(callingGate([{ kind: "goto", to: END }, { kind: "link", flow: "verify", carry: [] }])).toThrow(rejected);
+  });
+
+  it("lets a linked flow call another flow", async () => {
+    const start: Flow = { name: "start", title: "Start", slots: [], steps: [{ kind: "link", flow: "booking", carry: [] }] };
+    const { engine, send } = create({ start });
+    await engine.start("start");
     expect(engine.snapshot().map(({ flow, called }) => ({ flow, called }))).toEqual([
       { flow: "booking", called: false },
       { flow: "verify", called: true },
@@ -510,7 +519,7 @@ describe("call", () => {
     const calling = (steps: Flow["steps"]) => () => create({ verify: { ...verify, steps } });
     expect(calling([{ kind: "call", flow: "nowhere" }])).toThrow("Flow verify: calls unknown flow nowhere");
     expect(calling([{ kind: "call", flow: "booking" }])).toThrow("Flow booking: calls verify, which leads back to booking");
-    expect(calling([{ kind: "link", flow: "booking", carry: [] }])).toThrow("Flow booking: calls verify, which leads back to booking");
+    expect(calling([{ kind: "link", flow: "booking", carry: [] }])).toThrow("Flow booking: calls verify, which uses a link");
   });
 });
 

@@ -175,7 +175,10 @@ flows:
   will call later. "555-0100, Friday" as the answer to the phone question also fills the booking's `day`. `rejections`
   of another flow's slot run when that flow reaches its `collect` step, as in Rasa.
 - Cancelling inside a called flow cancels the flow the customer started, and a task switch parks both flows.
-- A called flow can call another flow, but a flow can't lead back to itself through calls and links.
+- A called flow can call another flow, but a flow can't lead back to itself through calls.
+- A called flow can't use a `link`, as in Rasa: a `link` ends the flow for good, and a `call` has to come back. To reuse
+  part of a flow that has a `link`, move the shared steps to a flow of their own, call it, and keep the `link` in the
+  caller.
 
 [Flows in code](flows-in-code.md#calling-a-flow) describes all of it in detail, and
 [examples/appointments](../examples/appointments/README.md) shows it in use.

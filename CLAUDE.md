@@ -59,8 +59,8 @@ from that version's `CHANGELOG.md` section, reruns the checks and publishes via 
     resumes with a `messages.resume` line. A `link` replaces the frame and carries the listed slots along. A `call`
     pushes a frame marked `called` with all the caller's slots; when it ends, its slots replace the caller's and the
     caller continues without a resume line.
-  - `validateFlows()` checks references (step ids, slots, linked flows) in the constructor, so broken flows fail at
-    construction rather than mid-conversation.
+  - `validateFlows()` checks references (step ids, slots, linked flows) and rejects a `call` to a flow that uses a
+    `link`, in the constructor, so broken flows fail at construction rather than mid-conversation.
 - `src/compile.ts` – `compileFlows(data, registry)`: compiles a subset of Rasa's YAML flow syntax into the same `Flow`
   objects as hand-written flows. Actions and dynamic options are looked up by name in a `FlowRegistry`. `action: utter_*`
   becomes a `say` step from `responses`. Nested `then`/`else` branches are flattened into extra step lists appended after
