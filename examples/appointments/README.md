@@ -41,6 +41,18 @@ bot:      I couldn't find a patient with this phone number.
 customer: 555-0100
 bot:      Thank you, Jane, you are verified.
           Done: you're booked for Friday.            ← the day survived the turned-down number
+
+customer: Book me in
+bot:      What is your phone number?
+customer: Cancel my appointment instead              ← a task switch parks the booking and its verification
+bot:      OK, I'll put "Book appointment" aside for now.
+          What is your phone number?
+customer: 555-0100
+bot:      Thank you, Jane, you are verified.
+          You have no appointment to cancel.
+          Back to Book appointment: Which day would you like?   ← persisted_slots: the parked question is answered
+customer: Friday
+bot:      Done: you're booked for Friday.
 ```
 
 The example comes in two versions that behave the same:
@@ -63,6 +75,7 @@ What the example uses:
 | Checking after the call | An `END` in the verification ends only the verification. The caller checks `patient_id` and ends itself when it isn't set |
 | `if: False` | Hides `verify_patient` from routing: "verify me" never starts it on its own, only a `call` does |
 | Cancel | "forget it" during the verification cancels the booking: the customer started the booking, not the verification |
+| `persisted_slots: [phone]` | When a task ends, the number goes to the flows parked below it, so the parked verification doesn't ask again |
 
 ## YAML
 
@@ -74,6 +87,7 @@ flows:
     name: Patient verification
     description: Finds the patient by phone number before anything is done with their appointments.
     if: False # hidden from routing: only a `call` starts it
+    persisted_slots: [phone] # a flow parked on this question doesn't ask it again
     steps:
       - action: action_recall_patient # code: sets patient_id when this conversation verified the patient already
         next:
@@ -88,7 +102,6 @@ flows:
         on_exhausted:
           - action: utter_verification_failed
             next: END
-      - action: utter_verified
 
   book_appointment:
     name: Book appointment
@@ -118,7 +131,6 @@ flows:
 
 responses:
   utter_ask_phone: What is your phone number?
-  utter_verified: Thank you, {patient_name}, you are verified.
   utter_verification_failed: Sorry, I couldn't verify you. Please call the front desk.
   utter_ask_day: Which day would you like?
 ```
@@ -141,10 +153,11 @@ export function createActions(): Actions {
   return {
     recallPatient: () => (verified ? patientSlots(verified) : undefined),
     verifyPhone: (slots) => {
+      if (verified) return patientSlots(verified); // a second run, for a parked flow: nothing new to say
       const patient = patients[String(slots.phone)];
       if (!patient) return { say: "I couldn't find a patient with this phone number.", setSlots: { phone: null } };
       verified = patient;
-      return patientSlots(patient);
+      return { say: `Thank you, ${patient.name}, you are verified.`, ...patientSlots(patient) };
     },
     // …
   };
@@ -152,6 +165,17 @@ export function createActions(): Actions {
 ```
 
 Create the actions, the flows and the engine once per conversation, as [main.ts](main.ts) does.
+
+### A parked verification
+
+A parked flow goes on from its waiting question, so `action_recall_patient` doesn't run again. Without
+`persisted_slots: [phone]`, the booking would ask for the number the customer has just given to the cancel. With it, the
+number goes to the parked verification when the cancel ends, and the question is skipped.
+
+The verification's `verify` then runs a second time, because the value passes through the `collect` step like any other.
+So the action says "Thank you" itself, and only on the first run: as a step after the `collect`, it would be said twice.
+A turned-down number is cleared, so it never reaches the parked flow. See
+[Slots for parked flows](https://github.com/gallas-ai/flow-engine/blob/main/docs/yaml.md#slots-for-parked-flows).
 
 ## Code
 
@@ -163,12 +187,12 @@ const verifyPatient: Flow = {
   title: "Patient verification",
   description: "Finds the patient by phone number before anything is done with their appointments.",
   routable: false, // like `if: False`: only a `call` starts it
+  persistedSlots: ["phone"], // a flow parked on this question doesn't ask it again
   slots: [{ name: "phone", type: "text", description: "the patient's phone number", question: () => "What is your phone number?" }],
   steps: [
     { kind: "action", run: actions.recallPatient },
     { kind: "goto", to: END, when: (slots) => "patient_id" in slots },
     { kind: "collect", slot: "phone", verify: actions.verifyPhone, maxAttempts: 2, onExhausted: "failed" },
-    { kind: "say", text: (slots) => `Thank you, ${slots.patient_name}, you are verified.` },
     { kind: "end" },
     { id: "failed", kind: "say", text: () => "Sorry, I couldn't verify you. Please call the front desk." },
   ],
@@ -194,6 +218,7 @@ How the YAML keys map to code:
 |---|---|
 | `call: verify_patient` | `{ kind: "call", flow: "verify_patient" }` |
 | `if: False` on a flow | `routable: false` on the flow |
+| `persisted_slots: [phone]` on a flow | `persistedSlots: ["phone"]` on the flow |
 | `next:` with `if: slots.patient_id is null` after the call | `{ kind: "goto", to: END, when: (slots) => !("patient_id" in slots) }` |
 
 ## Compared with writing the verification into each flow

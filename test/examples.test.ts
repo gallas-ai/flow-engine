@@ -142,6 +142,18 @@ describe.each([
     expect(engine.snapshot()).toEqual([]);
   });
 
+  it("doesn't ask a parked booking for the phone number when another task verified the patient", async () => {
+    const { send } = create();
+    await send("book me in");
+    expect(await send("cancel my appointment instead")).toEqual([`OK, I'll put "Book appointment" aside for now.`, "What is your phone number?"]);
+    expect(await send("555-0100")).toEqual([
+      "Thank you, Jane, you are verified.",
+      "You have no appointment to cancel.",
+      "Back to Book appointment: Which day would you like?",
+    ]);
+    expect(await send("Friday")).toEqual(["Done: you're booked for Friday."]);
+  });
+
   it("doesn't verify again later in the same conversation", async () => {
     const { send } = create();
     await send("book me in, 555-0100, Tuesday");

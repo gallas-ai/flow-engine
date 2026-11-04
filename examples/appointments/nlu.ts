@@ -11,4 +11,5 @@ export const nlu = keywordNlu({
     day: (text) => DAYS.exec(text)?.[1]!.replace(/^./, (first) => first.toUpperCase()),
   },
   cancel: /forget it/i,
+  taskSwitch: /\binstead\b/i,
 });

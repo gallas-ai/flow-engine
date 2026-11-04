@@ -16,7 +16,7 @@ What it handles for you:
 - **Actions**: your code (sync or async) looks things up, says something and stores results the next steps decide on.
 - **Options**: choice questions offer only valid values. A single option is picked without asking.
 - **Turn types**: an answer, a question about the step, a digression, a task switch, or a cancel.
-- **Flow stack**: a task switch parks the current flow and resumes it afterwards.
+- **Flow stack**: a task switch parks the current flow and resumes it afterwards, or when the customer asks for it again.
 - **Links**: one flow can hand over to another and carry values along.
 - **Calls**: one flow can run another, e.g. a verification several flows share, and continue when it ends.
 - **YAML**: flows can be written as YAML that reads like the support team's process documentation.
@@ -125,7 +125,7 @@ from a clone of the repository with `npm run example -- <example> [yaml|code]`.
 | Example | What it shows |
 |---|---|
 | [verification](https://github.com/gallas-ai/flow-engine/tree/main/examples/verification) | Checking an answer against a CRM with `verify`, limited retries with `max_attempts`, giving up with `on_exhausted` |
-| [appointments](https://github.com/gallas-ai/flow-engine/tree/main/examples/appointments) | Two flows sharing one verification with `call`, a flow hidden from routing with `if: False`, checking the slots a call hands back, one answer filling several flows, cancelling a called flow |
+| [appointments](https://github.com/gallas-ai/flow-engine/tree/main/examples/appointments) | Two flows sharing one verification with `call`, a flow hidden from routing with `if: False`, checking the slots a call hands back, one answer filling several flows, cancelling a called flow, `persisted_slots` sparing a parked flow its question |
 | [delivery-reschedule](https://github.com/gallas-ai/flow-engine/tree/main/examples/delivery-reschedule) | One flow in English, Czech and Spanish: `responses` per language, translated `messages`, one `Nlu` per language, translated choice-option labels |
 
 ## Documentation

@@ -122,6 +122,7 @@ class FlowCompiler {
       title: optionalString(data.name, `${this.path}.name`) ?? this.name,
       description: optionalString(data.description, `${this.path}.description`),
       ...(data.if === false && { routable: false }),
+      ...(this.carry.length > 0 && { persistedSlots: this.carry }),
       slots: [...this.slots.values()],
       steps: this.steps,
     };

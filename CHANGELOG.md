@@ -6,7 +6,21 @@ All notable changes for users of `@gallas-ai/flow-engine`. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`persistedSlots` on a flow** (YAML: `persisted_slots`): the listed slots go to the parked flows when the flow leaves,
+  at its end, on a cancel or on a `link`. A parked question whose slot got a value this way isn't asked again, so a
+  customer who verifies during another task isn't asked to verify again when the first task resumes. The parked `collect`
+  step checks the value, and its `verify` and the steps after it run again.
+  [Code](https://github.com/gallas-ai/flow-engine/blob/main/docs/flows-in-code.md#slots-for-parked-flows) ·
+  [YAML](https://github.com/gallas-ai/flow-engine/blob/main/docs/yaml.md#slots-for-parked-flows)
+
 ### Changed
+
+- ⚠️ **`persisted_slots` in YAML also reaches parked flows.** It used to list only what a `link` carries. If your YAML
+  flows use it, a parked flow now gets these values when the flow leaves, and replaces its own value of the same name.
+  Flows written in code don't change: `link.carry` stays what it was.
+  [Docs](https://github.com/gallas-ai/flow-engine/blob/main/docs/yaml.md#slots-for-parked-flows)
 
 - ⚠️ **A called flow can't use a `link`.** `new FlowEngine` now throws when a flow calls a flow that has a `link` step,
   even in a branch the call would never reach. This breaks your flows if they combine the two; they lost the caller's
@@ -25,6 +39,10 @@ All notable changes for users of `@gallas-ai/flow-engine`. The format follows
 
 ### Fixed
 
+- **The same flow twice on the stack.** A task switch or a `link` to a parked flow started a second copy of it, so after
+  finishing it the customer was asked to go through the parked copy too. Now the parked flow resumes where it stopped and
+  keeps its slots; on a task switch the current flow is parked instead.
+  [Code](https://github.com/gallas-ai/flow-engine/blob/main/docs/flows-in-code.md#a-flow-runs-only-once)
 - **Values lost during a `call`.** When the customer answered a called flow's question and added something for the
   caller ("555-0100, Friday"), the bot forgot it and asked again. Now every message is read for the whole call, also for
   flows that start later, and the value survives even when the called flow turns the answer down. `validate` and
@@ -35,7 +53,7 @@ All notable changes for users of `@gallas-ai/flow-engine`. The format follows
 ### Docs & examples
 
 - [examples/appointments](https://github.com/gallas-ai/flow-engine/tree/main/examples/appointments) shows one answer
-  filling both the verification and the booking.
+  filling both the verification and the booking, and a parked booking that isn't asked again for the phone number.
 
 ## [0.3.0] - 2026-11-01
 

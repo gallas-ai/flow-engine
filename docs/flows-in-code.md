@@ -78,7 +78,7 @@ await engine.handle("I want to return the mug");
 | `{ kind: "action", run }` | Runs your code (sync or async) and waits for it. It returns `{ say?, setSlots? }`: what to say and which slots to store. `null` in `setSlots` clears a slot |
 | `{ kind: "set", values }` | Stores fixed values in slots; `null` clears one |
 | `{ kind: "goto", to, when }` | Jumps to the step with that `id`, or to `END`, when `when(slots)` holds. Without `when` it always jumps |
-| `{ kind: "link", flow, carry, message? }` | Replaces the current flow with another one and takes the slots listed in `carry` along |
+| `{ kind: "link", flow, carry, message? }` | Replaces the current flow with another one and takes the slots listed in `carry` along. If that flow is parked, it resumes where it stopped instead of starting again |
 | `{ kind: "call", flow }` | Runs another flow with this flow's slots, then continues with the next step. See [Calling a flow](#calling-a-flow) |
 | `{ kind: "end" }` | Ends the flow. A flow parked below it resumes |
 
@@ -154,3 +154,39 @@ answers the message. Use it for flows that make sense only inside another flow, 
 `engine.snapshot()` marks called frames with `called: true`; the frame below a called frame is its caller.
 
 [examples/appointments](../examples/appointments/README.md) shows two flows calling the same verification.
+
+## A flow runs only once
+
+A task switch or a `link` to a flow that is parked doesn't start a second copy: that flow, with the flows it called,
+resumes where it stopped and keeps its slots. On a task switch the current flow is parked in its place, and the message is
+read for the resumed flow's open slots. A `link` ends the current flow, and the slots in its `carry` replace the
+resumed flow's values. A `call` always runs the called flow, even when it is also parked in another chain.
+
+## Slots for parked flows
+
+A task switch parks the flow that was asking, and when it resumes it goes on from its waiting question. If the other
+task collected the same slot, the customer would be asked for it twice. List such a slot in `persistedSlots`:
+
+```ts
+const verify: Flow = {
+  name: "verify",
+  title: "Patient verification",
+  routable: false,
+  persistedSlots: ["phone"], // a flow parked on this question doesn't ask it again
+  slots: [{ name: "phone", type: "text", description: "the patient's phone number", question: () => "What is your phone number?" }],
+  steps: [{ kind: "collect", slot: "phone", verify: verifyPhone }],
+};
+```
+
+- The values go to all parked flows when the flow leaves: at its end, on a cancel and on a `link`. The `persistedSlots`
+  of the flows it calls count too, so a task that calls `verify` hands over `phone` without listing it.
+- A value replaces an older one in the parked flow. A slot without a value changes nothing.
+- The parked `collect` step checks the value like any other: `validate` and `options` apply, and `verify` runs again.
+  The steps after it run too, so make sure that an action can run twice and doesn't say the same thing again.
+- Clear a value you finally turned down before the flow ends, or it reaches the parked flow.
+- A `prefill: false` slot still asks.
+- Only parked flows get the values: a flow started later starts with empty slots. A question whose slot nobody
+  filled is asked again.
+- `persistedSlots` doesn't affect a `link`: what it takes along is its `carry`. In YAML, `persisted_slots` sets both.
+
+[examples/appointments](https://github.com/gallas-ai/flow-engine/tree/main/examples/appointments) shows this.

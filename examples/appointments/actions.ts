@@ -20,10 +20,11 @@ export function createActions(): Actions {
     recallPatient: () => (verified ? patientSlots(verified) : undefined),
     /** Finds the patient; an unknown number is cleared, which the collect step counts as a failed attempt. */
     verifyPhone: (slots) => {
+      if (verified) return patientSlots(verified); // a second run, for a parked flow: nothing new to say
       const patient = patients[String(slots.phone)];
       if (!patient) return { say: "I couldn't find a patient with this phone number.", setSlots: { phone: null } };
       verified = patient;
-      return patientSlots(patient);
+      return { say: `Thank you, ${patient.name}, you are verified.`, ...patientSlots(patient) };
     },
     bookAppointment: (slots) => {
       appointments.set(String(slots.patient_id), String(slots.day));
