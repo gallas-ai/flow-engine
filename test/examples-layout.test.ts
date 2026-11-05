@@ -45,6 +45,7 @@ describe.each(examples)("examples/%s", (example) => {
     expect(firstSection).toBe("## Run it");
     const runSection = readme.split(/^## /m)[1]!;
     expect(runSection).toContain(`npm run example -- ${example}`);
+    expect(runSection).toContain(`OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 npm run example -- ${example}`);
   });
 
   it("is linked from the main README", () => {

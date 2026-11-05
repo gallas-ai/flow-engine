@@ -1,0 +1,31 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # MLflow shows a span's inputs and outputs from its own attributes; the engine writes neutral ones (recordContent)
+  transform/mlflow:
+    trace_statements:
+      - set(span.attributes["mlflow.spanInputs"], span.attributes["flow_engine.input"]) where span.attributes["flow_engine.input"] != nil
+      - set(span.attributes["mlflow.spanOutputs"], span.attributes["flow_engine.output"]) where span.attributes["flow_engine.output"] != nil
+  batch: {}
+
+exporters:
+  debug:
+    verbosity: basic
+  # MLflow takes OTLP over HTTP only, at /v1/traces; experiment 0 is MLflow's "Default"
+  otlp_http/mlflow:
+    endpoint: http://mlflow:5000
+    headers:
+      x-mlflow-experiment-id: "0"
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [transform/mlflow, batch]
+      exporters: [debug, otlp_http/mlflow]

@@ -17,5 +17,8 @@ export type {
   SlotValue,
   Slots,
   Step,
+  Tracer,
+  TracerAttributeValue,
+  TracerSpan,
   TurnType,
 } from "./types.ts";

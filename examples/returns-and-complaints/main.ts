@@ -3,6 +3,7 @@
 import { readFile } from "node:fs/promises";
 import { parse } from "yaml";
 import { compileFlows, FlowEngine, type Flow } from "../../src/index.ts";
+import { tracing } from "../shared/tracing.ts";
 import { selectVariants, transcript } from "../shared/transcript.ts";
 import { createFlows } from "./flows.ts";
 import { languages, type Language } from "./languages.ts";
@@ -44,7 +45,7 @@ for (const variant of selected) {
       if (index > 0) console.log();
       const { customer, bot } = transcript();
       // the application picks the language before the first message
-      const engine = new FlowEngine({ flows, nlu: nlu[language], output: bot });
+      const engine = new FlowEngine({ flows, nlu: nlu[language], output: bot, ...tracing() });
       for (const text of conversation) {
         customer(text);
         await engine.handle(text);

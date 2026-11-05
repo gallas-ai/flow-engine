@@ -145,3 +145,24 @@ export type FlowEngineEvent =
 
 /** One frame of the flow stack, as data. `called` = the frame below called it. */
 export type FrameSnapshot = { flow: string; title: string; step: number; waitingFor: string | null; slots: Slots; called: boolean };
+
+/** A span attribute value, as OpenTelemetry takes it. */
+export type TracerAttributeValue = string | number | boolean | string[];
+
+/** The part of an OpenTelemetry span the engine uses; a span from `@opentelemetry/api` fits as it is. */
+export interface TracerSpan {
+  setAttribute(key: string, value: TracerAttributeValue): unknown;
+  addEvent(name: string, attributes?: Record<string, TracerAttributeValue>): unknown;
+  recordException(exception: Error | string): void;
+  /** The engine only sets ERROR (code 2). */
+  setStatus(status: { code: 2; message?: string }): unknown;
+  end(): void;
+}
+
+/**
+ * The part of an OpenTelemetry tracer the engine uses: `trace.getTracer("…")` from `@opentelemetry/api` fits as it is.
+ * `startActiveSpan` makes the span active while `fn` runs, so spans opened inside `Nlu` or an action nest under it.
+ */
+export interface Tracer {
+  startActiveSpan<F extends (span: TracerSpan) => unknown>(name: string, fn: F): ReturnType<F>;
+}

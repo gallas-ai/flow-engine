@@ -1,5 +1,7 @@
 // npm run example -- <example> [yaml|code]: plays examples/<example>/main.ts.
+// With OTEL_EXPORTER_OTLP_ENDPOINT set, it also traces the conversations: see docs/tracing.md.
 import { existsSync, readdirSync } from "node:fs";
+import { startTracing, stopTracing } from "./tracing.ts";
 
 const examples = readdirSync(new URL("..", import.meta.url), { withFileTypes: true })
   .filter((entry) => entry.isDirectory() && entry.name !== "shared")
@@ -11,4 +13,6 @@ if (!name || !examples.includes(name) || !existsSync(main)) {
   console.error(`Usage: npm run example -- <example> [yaml|code]\nExamples: ${examples.join(", ")}`);
   process.exit(1);
 }
+startTracing(name);
 await import(main.href);
+await stopTracing();

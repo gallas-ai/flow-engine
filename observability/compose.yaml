@@ -1,0 +1,30 @@
+# Try the engine's tracing locally: docker compose -f observability/compose.yaml up
+# Spans go app → OpenTelemetry Collector (localhost:4318) → MLflow (http://localhost:5050). See docs/tracing.md.
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.163.2 # contrib: it has the transform processor
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel-collector.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4317:4317" # OTLP gRPC
+      - "4318:4318" # OTLP HTTP
+    depends_on:
+      - mlflow
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v3.17.2
+    # OTLP ingest needs a SQL backend store; SQLite is enough here.
+    # --allowed-hosts: the collector calls MLflow as mlflow:5000, which the default (localhost only) turns down with 403
+    command: >
+      mlflow server --host 0.0.0.0 --port 5000
+      --backend-store-uri sqlite:////mlflow/mlflow.db
+      --artifacts-destination /mlflow/artifacts
+      --allowed-hosts mlflow:5000,localhost:*
+    volumes:
+      - mlflow:/mlflow
+    ports:
+      - "${MLFLOW_PORT:-5050}:5000" # not 5000 on the host: macOS's AirPlay Receiver often holds it
+
+volumes:
+  mlflow:

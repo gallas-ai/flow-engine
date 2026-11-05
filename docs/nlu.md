@@ -289,6 +289,7 @@ const engine = new FlowEngine({
   output: (text) => send(text), // everything the bot says
   onEvent: (event) => log(event), // optional: routing, turn types, extracted values, flows started and ended
   messages: { flowCancelled: (title) => `${title} zrušeno.` }, // optional: the engine's own texts, e.g. translated
+  tracer: trace.getTracer("my-bot"), // optional: OpenTelemetry spans for every message, see docs/tracing.md
 });
 
 await engine.handle(text); // one customer message
@@ -296,7 +297,8 @@ engine.snapshot(); // the flow stack as data: flow, step, the question it waits 
 ```
 
 The engine's own texts (not understood, flow parked, flow cancelled, back to…, the option list format) are in
-`defaultMessages`; `messages` replaces any of them.
+`defaultMessages`; `messages` replaces any of them. `tracer`, `recordContent` and `traceAttributes` are described in
+[Tracing](tracing.md).
 
 ## Multiple languages
 
