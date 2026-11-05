@@ -120,7 +120,9 @@ YAML and code flows produce the same `Flow` objects and can be mixed.
 ## Examples
 
 Each example is one use case, written both in YAML and in code, with a fake NLU so it runs without an LLM. Run one
-from a clone of the repository with `npm run example -- <example> [yaml|code]`.
+from a clone of the repository with `npm run example -- <example> [yaml|code]`. With `OTEL_EXPORTER_OTLP_ENDPOINT`
+set, it also sends each message as a trace to a
+[local OpenTelemetry Collector and MLflow](https://github.com/gallas-ai/flow-engine/blob/main/docs/tracing.md#try-it-locally-with-mlflow).
 
 | Example | What it shows |
 |---|---|
@@ -134,6 +136,7 @@ from a clone of the repository with `npm run example -- <example> [yaml|code]`.
 - [Flows in code](https://github.com/gallas-ai/flow-engine/blob/main/docs/flows-in-code.md) – slots, steps, actions
 - [Flows in YAML](https://github.com/gallas-ai/flow-engine/blob/main/docs/yaml.md) – steps, branching, conditions, responses, differences from Rasa
 - [Connecting an LLM](https://github.com/gallas-ai/flow-engine/blob/main/docs/nlu.md) – the `Nlu` interface and engine options
+- [Tracing](https://github.com/gallas-ai/flow-engine/blob/main/docs/tracing.md) – OpenTelemetry spans for every message, trying it locally with MLflow
 
 ## Development
 

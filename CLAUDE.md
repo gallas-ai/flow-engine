@@ -74,6 +74,10 @@ from that version's `CHANGELOG.md` section, reruns the checks and publishes via 
     resumes with a `messages.resume` line. A `link` replaces the frame and carries the listed slots along. A `call`
     pushes a frame marked `called` with all the caller's slots; when it ends, its slots replace the caller's and the
     caller continues without a resume line.
+  - Tracing (`docs/tracing.md`): with `options.tracer`, `handle()` and `start()` are root spans, and `inSpan()` wraps
+    the NLU calls, `fill`, each step and actions. `output` and `emit` add span events to the innermost span. Content
+    goes on spans only through `record()`, which checks `recordContent`. `Tracer` is our own subset of OpenTelemetry's,
+    not a dependency (`docs/adr/0004-own-tracer-interface.md`).
   - `validateFlows()` checks references (step ids, slots, linked flows) and rejects a `call` to a flow that uses a
     `link`, in the constructor, so broken flows fail at construction rather than mid-conversation.
 - `src/compile.ts` – `compileFlows(data, registry)`: compiles a subset of Rasa's YAML flow syntax into the same `Flow`
@@ -107,6 +111,8 @@ Semantics that are easy to break:
 
 - Tests use a **fake keyword NLU** (an object implementing `Nlu`), never a real LLM. They collect output through the
   `output` callback and assert on the lines said per turn and on `engine.snapshot()`.
+- Tracing tests: `test/tracing.test.ts` records spans with a fake `Tracer`; `test/opentelemetry.test.ts` runs the
+  engine against the real OpenTelemetry SDK (dev dependencies only) and checks that its `Span` fits `TracerSpan`.
 - YAML sources are imported with Vite's `?raw` suffix (typed by `test/raw.d.ts`). The shop fixture is
   `test/fixtures/eshop.yaml`.
 - `test/examples.test.ts` runs scenarios from `examples/verification/` and `examples/appointments/` against both the
@@ -121,7 +127,8 @@ shared `keywordNlu` from `examples/shared/nlu.ts`), `main.ts` and, if needed, `a
 `src` must stay runnable by Node's type stripping, hence `erasableSyntaxOnly`.
 
 How to run the example is the most important information in its README: the first section, right after the title and
-the one-line intro, is `## Run it` with the `npm run example -- <example>` command. Never move it further down.
+the one-line intro, is `## Run it` with the `npm run example -- <example>` command. Never move it further down. The section also shows the same command with
+`OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318` for tracing it in MLflow.
 
 `test/examples-layout.test.ts` enforces this. For every example it checks that the files exist, that the README starts
 with the `## Run it` section, that the main README

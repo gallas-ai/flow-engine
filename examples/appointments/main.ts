@@ -3,6 +3,7 @@
 import { readFile } from "node:fs/promises";
 import { parse } from "yaml";
 import { compileFlows, FlowEngine, type Flow } from "../../src/index.ts";
+import { tracing } from "../shared/tracing.ts";
 import { selectVariants, transcript } from "../shared/transcript.ts";
 import { createActions, registry, type Actions } from "./actions.ts";
 import { createFlows } from "./flows.ts";
@@ -27,7 +28,7 @@ for (const variant of selected) {
   for (const conversation of conversations) {
     const { customer, bot } = transcript();
     // fresh actions for every conversation: they remember who was verified in it
-    const engine = new FlowEngine({ flows: await variants[variant](createActions()), nlu, output: bot });
+    const engine = new FlowEngine({ flows: await variants[variant](createActions()), nlu, output: bot, ...tracing() });
     for (const text of conversation) {
       customer(text);
       await engine.handle(text);

@@ -6,7 +6,20 @@ All notable changes for users of `@gallas-ai/flow-engine`. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Tracing with OpenTelemetry**: pass `tracer: trace.getTracer("…")` from `@opentelemetry/api`, and each customer
+  message becomes a trace, with spans for the NLU calls, reading slot values, every step that ran, actions and `verify`.
+  `traceAttributes` puts your own attributes on each message's span (e.g. `session.id`), and `recordContent: true` adds
+  customer texts, bot lines and slot values, which are left out by default. The package still has no dependencies, and
+  without a tracer nothing changes.
+  [Tracing](https://github.com/gallas-ai/flow-engine/blob/main/docs/tracing.md)
+
 ### Docs & examples
+
+- [Try tracing locally](https://github.com/gallas-ai/flow-engine/blob/main/docs/tracing.md#try-it-locally-with-mlflow):
+  a Docker Compose setup with an OpenTelemetry Collector and MLflow, and every example traces its conversations when
+  `OTEL_EXPORTER_OTLP_ENDPOINT` is set.
 
 - [Few-shot examples in `route`](https://github.com/gallas-ai/flow-engine/blob/main/docs/nlu.md#few-shot-examples-in-route):
   how to steer your NLU's choice of flow with a few example messages, also in several languages and for messages that

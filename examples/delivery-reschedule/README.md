@@ -14,6 +14,17 @@ npm run example -- delivery-reschedule yaml   # or: code
 
 On Node 22.18 or newer, `node examples/delivery-reschedule/main.ts yaml` works too.
 
+To see each message as a trace in MLflow, start the local OpenTelemetry Collector and MLflow, then run the example with
+`OTEL_EXPORTER_OTLP_ENDPOINT` set:
+
+```bash
+docker compose -f observability/compose.yaml up -d
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 npm run example -- delivery-reschedule
+```
+
+Then open <http://localhost:5050>, the **Default** experiment and its **Traces** tab. More in
+[Tracing](../../docs/tracing.md#try-it-locally-with-mlflow).
+
 ## What it does
 
 The same conversation, once in each language.

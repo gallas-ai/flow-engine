@@ -5,7 +5,7 @@
 // it gets an `Nlu` implementation injected, so it runs just as well with a fake keyword NLU in tests.
 import { defaultMessages } from "./messages.ts";
 import { END } from "./types.ts";
-import type { Action, ActionResult, Flow, FlowEngineEvent, FlowSummary, FrameSnapshot, Messages, Nlu, SlotDefinition, SlotValue, Slots } from "./types.ts";
+import type { Action, ActionResult, Flow, FlowEngineEvent, FlowSummary, FrameSnapshot, Messages, Nlu, SlotDefinition, SlotValue, Slots, Step, Tracer, TracerAttributeValue, TracerSpan } from "./types.ts";
 
 type Frame = {
   flow: Flow;
@@ -32,7 +32,16 @@ export type FlowEngineOptions = {
   onEvent?: (event: FlowEngineEvent) => void;
   /** Overrides for the engine's own texts (e.g. a translation); the rest stays default. */
   messages?: Partial<Messages>;
+  /** Traces every message as an OpenTelemetry span: pass `trace.getTracer("…")` from `@opentelemetry/api` (docs/tracing.md). */
+  tracer?: Tracer;
+  /** Puts customer texts, bot lines, slot values and NLU results on the spans. Off by default: they can hold personal data. */
+  recordContent?: boolean;
+  /** Put as they are on the span of each message and each `start`, e.g. `{ "session.id": conversationId }`. */
+  traceAttributes?: Record<string, TracerAttributeValue>;
 };
+
+/** The span used when there is no tracer: it records nothing. */
+const NO_SPAN: TracerSpan = { setAttribute() {}, addEvent() {}, recordException() {}, setStatus() {}, end() {} };
 
 export class FlowEngine {
   private readonly stack: Frame[] = [];
@@ -42,6 +51,13 @@ export class FlowEngine {
   private readonly output: (text: string) => void;
   private readonly emit: (event: FlowEngineEvent) => void;
   private readonly messages: Messages;
+  private readonly tracer: Tracer | undefined;
+  private readonly recordContent: boolean;
+  private readonly traceAttributes: Record<string, TracerAttributeValue>;
+  /** The innermost open span: it gets the bot's lines and the engine's events. */
+  private current: TracerSpan = NO_SPAN;
+  /** What the engine said since the message (or `start`) came in – the output of its span. */
+  private said: string[] = [];
 
   constructor(options: FlowEngineOptions) {
     validateFlows(options.flows);
@@ -49,9 +65,13 @@ export class FlowEngine {
     this.summaries = Object.values(options.flows)
       .filter((flow) => flow.routable !== false)
       .map(({ name, title, description }) => ({ name, title, description }));
-    this.nlu = options.nlu;
-    this.output = options.output;
-    this.emit = options.onEvent ?? (() => {});
+    this.tracer = options.tracer;
+    this.nlu = options.tracer ? this.traced(options.nlu) : options.nlu;
+    this.recordContent = options.recordContent ?? false;
+    this.traceAttributes = options.traceAttributes ?? {};
+    this.output = options.tracer ? (text) => this.say(text, options.output) : options.output;
+    const onEvent = options.onEvent ?? (() => {});
+    this.emit = options.tracer ? (event) => this.traceEvent(event, onEvent) : onEvent;
     this.messages = { ...defaultMessages, ...options.messages };
   }
 
@@ -64,6 +84,87 @@ export class FlowEngine {
     return this.stack.slice(start);
   }
 
+  /** Runs `fn` in a span: the active span with a tracer, one that records nothing without it. An error marks the span and goes on. */
+  private async inSpan<T>(name: string, fn: (span: TracerSpan) => Promise<T>): Promise<T> {
+    if (!this.tracer) return fn(NO_SPAN);
+    return this.tracer.startActiveSpan(name, async (span) => {
+      const parent = this.current;
+      this.current = span;
+      try {
+        return await fn(span);
+      } catch (error) {
+        span.recordException(error instanceof Error ? error : String(error));
+        span.setStatus({ code: 2, message: error instanceof Error ? error.message : String(error) });
+        throw error;
+      } finally {
+        this.current = parent;
+        span.end();
+      }
+    });
+  }
+
+  /** A span for a call from outside – a message or a started flow – with what came in and what the engine said. */
+  private root(name: string, input: unknown, run: (span: TracerSpan) => Promise<void>): Promise<void> {
+    return this.inSpan(name, async (span) => {
+      for (const [key, value] of Object.entries(this.traceAttributes)) span.setAttribute(key, value);
+      this.record(span, "input", input);
+      this.said = [];
+      try {
+        await run(span);
+      } finally {
+        this.record(span, "output", this.said);
+      }
+    });
+  }
+
+  /** With `recordContent`: the span's input or output, as JSON. */
+  private record(span: TracerSpan, key: "input" | "output", value: unknown): void {
+    if (this.recordContent) span.setAttribute(`flow_engine.${key}`, JSON.stringify(value ?? null));
+  }
+
+  private say(text: string, output: (text: string) => void): void {
+    this.current.addEvent("output", this.recordContent ? { "flow_engine.text": text } : undefined);
+    this.said.push(text);
+    output(text);
+  }
+
+  /** Adds the event to the innermost span; slot values only with `recordContent`. */
+  private traceEvent(event: FlowEngineEvent, onEvent: (event: FlowEngineEvent) => void): void {
+    const attributes: Record<string, TracerAttributeValue> = {};
+    for (const [key, value] of Object.entries(event) as [string, TracerAttributeValue | Slots | null][]) {
+      if (key === "type" || value === null) continue;
+      if (typeof value === "object" && !Array.isArray(value)) {
+        attributes["flow_engine.slots"] = Object.keys(value);
+        if (this.recordContent) attributes["flow_engine.values"] = JSON.stringify(value);
+      } else attributes[`flow_engine.${key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)}`] = value;
+    }
+    this.current.addEvent(event.type, attributes);
+    onEvent(event);
+  }
+
+  /** The NLU with each call in its own span. */
+  private traced(nlu: Nlu): Nlu {
+    const call = <T>(method: keyof Nlu, attributes: Record<string, TracerAttributeValue>, input: unknown, ask: () => Promise<T>) =>
+      this.inSpan(`Nlu.${method}`, async (span) => {
+        setAttributes(span, { current_flow_id: this.top?.flow.name, ...attributes });
+        this.record(span, "input", input);
+        const result = await ask();
+        this.record(span, "output", result);
+        return result;
+      });
+    return {
+      route: (text, flows) => call("route", { flow_count: flows.length }, { text, flows: flows.map(({ name }) => name) }, () => nlu.route(text, flows)),
+      classifyTurn: (flowTitle, question, text) =>
+        call("classifyTurn", {}, { flowTitle, question, text }, () => nlu.classifyTurn(flowTitle, question, text)),
+      extract: (flow, wanted, slots, text, question) => {
+        const names = wanted.map(({ name }) => name);
+        return call("extract", { wanted: names }, { flow: flow.name, wanted: names, slots, text, question }, () => nlu.extract(flow, wanted, slots, text, question));
+      },
+      choose: (question, text, options) => call("choose", {}, { question, text, options }, () => nlu.choose(question, text, options)),
+      answer: (text, step) => call("answer", {}, { text, step }, () => nlu.answer(text, step)),
+    };
+  }
+
   /** `Nlu.route`, limited to the flows it may pick: a flow hidden from routing counts as no flow. */
   private async route(text: string): Promise<string | null> {
     const flow = await this.nlu.route(text, this.summaries);
@@ -73,16 +174,25 @@ export class FlowEngine {
   // ───────────────────────── entry point ─────────────────────────
 
   async handle(text: string): Promise<void> {
+    return this.root("FlowEngine.handle", text, (span) => {
+      setAttributes(span, { current_flow_id: this.top?.flow.name, waiting_for: this.top?.waitingFor, stack_depth: this.stack.length });
+      return this.turn(text, span);
+    });
+  }
+
+  private async turn(text: string, span: TracerSpan): Promise<void> {
     const frame = this.top;
     if (!frame?.waitingFor) {
       const flow = await this.route(text);
+      setAttributes(span, { routed_flow: flow ?? undefined });
       this.emit({ type: "routed", flow });
-      if (flow) return this.start(flow, text);
+      if (flow) return this.begin(flow, text);
       return this.output(await this.nlu.answer(text));
     }
 
     const slot = this.slotDefinition(frame.flow, frame.waitingFor);
     const turnType = await this.nlu.classifyTurn(frame.flow.title, slot.question(frame.slots), text);
+    setAttributes(span, { turn_type: turnType });
     this.emit({ type: "turnClassified", turnType });
 
     switch (turnType) {
@@ -100,10 +210,11 @@ export class FlowEngine {
         return this.advance(true);
       case "task_switch": {
         const flow = await this.route(text);
+        setAttributes(span, { routed_flow: flow ?? undefined });
         const chain = this.chain();
         if (flow && !chain.some((frame) => frame.flow.name === flow)) {
           this.output(this.messages.flowParked(chain[0]!.flow.title)); // the whole call chain waits
-          if (!this.resumeParked(flow)) return this.start(flow, text);
+          if (!this.resumeParked(flow)) return this.begin(flow, text);
           this.top!.waitingFor = undefined; // the message isn't an answer to the question the flow was waiting on
           await this.fill(this.top!, text, true);
           return this.advance(true);
@@ -123,6 +234,13 @@ export class FlowEngine {
   }
 
   async start(name: string, text?: string, carried: Slots = {}): Promise<void> {
+    return this.root("FlowEngine.start", { text, carried }, (span) => {
+      setAttributes(span, { current_flow_id: name });
+      return this.begin(name, text, carried);
+    });
+  }
+
+  private async begin(name: string, text?: string, carried: Slots = {}): Promise<void> {
     await this.push(name, carried, false, new Set(), text);
     return this.advance(false);
   }
@@ -168,150 +286,168 @@ export class FlowEngine {
     const wanted = this.wanted(frame, waiting, prefill);
     if (!wanted.length) return { filled: [], reported: false };
 
-    const extraction = await this.nlu.extract(this.chain()[0]!.flow, wanted, frame.slots, text, waiting?.question(frame.slots));
-    const values = { ...extraction.values };
-    // the slot we asked about with several options → let the NLU pick one ("the one with the grinder", "number two")
-    if (waiting?.type === "choice" && !prefill) {
-      const options = waiting.options!(frame.slots);
-      if (options.length > 1) {
-        const chosen = await this.nlu.choose(waiting.question(frame.slots), text, options);
-        if (chosen) values[waiting.name] = chosen;
-      }
-    }
-    if (Object.keys(values).length || extraction.notAmongOptions.length) {
-      this.emit({ type: prefill ? "slotsPrefilled" : "slotsExtracted", values, notAmongOptions: extraction.notAmongOptions });
-    }
-
-    const filled: string[] = [];
-    let reported = false; // did we already tell the user what's wrong?
-    for (const definition of wanted) {
-      if (!frame.flow.slots.includes(definition)) {
-        // another flow's slot: its collect step checks the value, so the customer doesn't hear about it mid-verification
-        const value = values[definition.name];
-        if (value === undefined || value === "" || (definition.type !== "choice" && !this.hasType(definition, value, frame.slots))) continue;
-        frame.slots[definition.name] = value;
-        frame.unchecked.add(definition.name);
-        filled.push(definition.name);
-        continue;
-      }
-      if (definition.type === "choice" && extraction.notAmongOptions.includes(definition.name) && !(definition.name in values)) {
-        frame.noAutoSelect.add(definition.name);
-        if (definition.notAvailable) {
-          this.output(definition.notAvailable);
-          reported = true;
+    return this.inSpan("FlowEngine.fill", async (span) => {
+      setAttributes(span, { current_flow_id: frame.flow.name, prefill });
+      const extraction = await this.nlu.extract(this.chain()[0]!.flow, wanted, frame.slots, text, waiting?.question(frame.slots));
+      const values = { ...extraction.values };
+      // the slot we asked about with several options → let the NLU pick one ("the one with the grinder", "number two")
+      if (waiting?.type === "choice" && !prefill) {
+        const options = waiting.options!(frame.slots);
+        if (options.length > 1) {
+          const chosen = await this.nlu.choose(waiting.question(frame.slots), text, options);
+          if (chosen) values[waiting.name] = chosen;
         }
-        continue;
       }
-      const value = values[definition.name];
-      if (value === undefined || value === "" || !this.hasType(definition, value, frame.slots)) continue;
-      const error = definition.validate?.(value, frame.slots);
-      if (error) {
-        this.output(error);
-        reported = true;
-        frame.noAutoSelect.add(definition.name);
-        if (definition === waiting && !prefill) countFailure(frame); // an answer to the question we asked counts as an attempt
-        continue;
+      if (Object.keys(values).length || extraction.notAmongOptions.length) {
+        this.emit({ type: prefill ? "slotsPrefilled" : "slotsExtracted", values, notAmongOptions: extraction.notAmongOptions });
       }
-      frame.slots[definition.name] = value;
-      filled.push(definition.name);
-    }
-    if (waiting && filled.includes(waiting.name)) {
-      frame.attempts = 0; // the next question starts with a clean count
-      frame.answered.add(waiting.name);
-    }
-    return { filled, reported };
+
+      const filled: string[] = [];
+      let reported = false; // did we already tell the user what's wrong?
+      for (const definition of wanted) {
+        if (!frame.flow.slots.includes(definition)) {
+          // another flow's slot: its collect step checks the value, so the customer doesn't hear about it mid-verification
+          const value = values[definition.name];
+          if (value === undefined || value === "" || (definition.type !== "choice" && !this.hasType(definition, value, frame.slots))) continue;
+          frame.slots[definition.name] = value;
+          frame.unchecked.add(definition.name);
+          filled.push(definition.name);
+          continue;
+        }
+        if (definition.type === "choice" && extraction.notAmongOptions.includes(definition.name) && !(definition.name in values)) {
+          frame.noAutoSelect.add(definition.name);
+          if (definition.notAvailable) {
+            this.output(definition.notAvailable);
+            reported = true;
+          }
+          continue;
+        }
+        const value = values[definition.name];
+        if (value === undefined || value === "" || !this.hasType(definition, value, frame.slots)) continue;
+        const error = definition.validate?.(value, frame.slots);
+        if (error) {
+          this.output(error);
+          reported = true;
+          frame.noAutoSelect.add(definition.name);
+          if (definition === waiting && !prefill) countFailure(frame); // an answer to the question we asked counts as an attempt
+          continue;
+        }
+        frame.slots[definition.name] = value;
+        filled.push(definition.name);
+      }
+      if (waiting && filled.includes(waiting.name)) {
+        frame.attempts = 0; // the next question starts with a clean count
+        frame.answered.add(waiting.name);
+      }
+      setAttributes(span, { filled });
+      this.record(span, "output", Object.fromEntries(filled.map((name) => [name, frame.slots[name]])));
+      return { filled, reported };
+    });
   }
 
   // ───────────────────────── the state machine ─────────────────────────
 
   /** Walk the steps until we need input from the user (or run out of flows). */
   private async advance(returning: boolean): Promise<void> {
-    while (true) {
+    while (this.top) {
       const frame = this.top;
-      if (!frame) return;
       const step = frame.flow.steps[frame.step];
-      frame.waitingFor = undefined;
+      const next = await this.inSpan("FlowEngine.run_step", (span) => {
+        setAttributes(span, { step_kind: step?.kind ?? "end", current_flow_id: frame.flow.name, step_index: frame.step, step_custom_id: step?.id });
+        return this.runStep(frame, step, returning, span);
+      });
+      if (next === null) return;
+      returning = next;
+    }
+  }
 
-      if (!step || step.kind === "end") {
+  /** Runs one step. Returns `returning` for the next step, or null once it asked a question and waits. */
+  private async runStep(frame: Frame, step: Step | undefined, returning: boolean, span: TracerSpan): Promise<boolean | null> {
+    frame.waitingFor = undefined;
+
+    if (!step || step.kind === "end") {
+      this.stack.pop();
+      this.emit({ type: "flowEnded", flow: frame.flow.name, title: frame.flow.title });
+      if (frame.called) {
+        this.top!.slots = frame.slots; // the caller goes on with the next step, no "back to…" line
+        return returning;
+      }
+      this.handToParked(frame.flow, frame.slots);
+      return true; // whatever is below gets a "back to…" line
+    }
+
+    switch (step.kind) {
+      case "collect": {
+        const definition = this.slotDefinition(frame.flow, step.slot);
+        setAttributes(span, { slot: step.slot });
+        const answered = frame.answered.delete(step.slot);
+        const unchecked = frame.unchecked.delete(step.slot);
+        if (step.slot in frame.slots) {
+          if (definition.prefill !== false || answered) {
+            if ((!unchecked || this.check(frame, definition)) && (!step.verify || (await this.verify(frame, step.verify, step.slot)))) { // ← prefilled = step skipped
+              frame.failures.delete(frame.step);
+              frame.step++;
+              setAttributes(span, { skipped: true });
+              return returning;
+            }
+          } else delete frame.slots[step.slot]; // carried, set by an action or answered on an earlier pass → ask again
+        }
+        if (step.maxAttempts !== undefined && (frame.failures.get(frame.step) ?? 0) >= step.maxAttempts) {
+          frame.failures.delete(frame.step);
+          frame.step = this.indexOf(frame.flow, step.onExhausted ?? END);
+          return returning;
+        }
+        const options = definition.options?.(frame.slots);
+        if (options && options.length === 0) {
+          this.output(definition.noOptions ?? this.messages.noOptions());
+          frame.step = frame.flow.steps.length; // → end
+          return returning;
+        }
+        if (options?.length === 1 && !frame.noAutoSelect.has(definition.name) && definition.prefill !== false) {
+          frame.slots[definition.name] = options[0]!.value; // only one option → don't ask
+          this.output(this.messages.autoSelected(options[0]!));
+          return returning; // the same step again, so that `verify` checks the value
+        }
+        frame.waitingFor = definition.name;
+        setAttributes(span, { skipped: false });
+        const question = definition.question(frame.slots) + (options ? this.messages.formatOptions(options) : "");
+        this.output(returning ? this.messages.resume(this.chain()[0]!.flow.title, question) : question);
+        return null;
+      }
+      case "say":
+        this.output(step.text(frame.slots));
+        frame.step++;
+        return returning;
+      case "action":
+        this.record(span, "output", await this.inSpan("action", (span) => this.traceRun(frame, step.run, span)));
+        frame.step++;
+        return returning;
+      case "set":
+        setSlots(frame.slots, step.values);
+        frame.step++;
+        return returning;
+      case "goto":
+        frame.step = !step.when || step.when(frame.slots) ? this.indexOf(frame.flow, step.to) : frame.step + 1;
+        return returning;
+      case "link": {
+        setAttributes(span, { target_flow: step.flow });
+        // e.g. a "return" turns out to be a "complaint": replace the flow, keep what we know
         this.stack.pop();
-        this.emit({ type: "flowEnded", flow: frame.flow.name, title: frame.flow.title });
-        if (frame.called) this.top!.slots = frame.slots; // the caller goes on with the next step, no "back to…" line
-        else {
-          this.handToParked(frame.flow, frame.slots);
-          returning = true; // whatever is below gets a "back to…" line
-        }
-        continue;
+        this.handToParked(frame.flow, frame.slots);
+        if (step.message) this.output(step.message);
+        const carried = Object.fromEntries(step.carry.filter((name) => name in frame.slots).map((name) => [name, frame.slots[name]!]));
+        if (this.resumeParked(step.flow)) {
+          const resumed = this.top!;
+          Object.assign(resumed.slots, carried);
+          for (const name of Object.keys(carried)) resumed.unchecked.add(name);
+        } else await this.push(step.flow, carried, false, new Set());
+        return false;
       }
-
-      switch (step.kind) {
-        case "collect": {
-          const definition = this.slotDefinition(frame.flow, step.slot);
-          const answered = frame.answered.delete(step.slot);
-          const unchecked = frame.unchecked.delete(step.slot);
-          if (step.slot in frame.slots) {
-            if (definition.prefill !== false || answered) {
-              if ((!unchecked || this.check(frame, definition)) && (!step.verify || (await this.verify(frame, step.verify, step.slot)))) { // ← prefilled = step skipped
-                frame.failures.delete(frame.step);
-                frame.step++;
-                continue;
-              }
-            } else delete frame.slots[step.slot]; // carried, set by an action or answered on an earlier pass → ask again
-          }
-          if (step.maxAttempts !== undefined && (frame.failures.get(frame.step) ?? 0) >= step.maxAttempts) {
-            frame.failures.delete(frame.step);
-            frame.step = this.indexOf(frame.flow, step.onExhausted ?? END);
-            continue;
-          }
-          const options = definition.options?.(frame.slots);
-          if (options && options.length === 0) {
-            this.output(definition.noOptions ?? this.messages.noOptions());
-            frame.step = frame.flow.steps.length; // → end
-            continue;
-          }
-          if (options?.length === 1 && !frame.noAutoSelect.has(definition.name) && definition.prefill !== false) {
-            frame.slots[definition.name] = options[0]!.value; // only one option → don't ask
-            this.output(this.messages.autoSelected(options[0]!));
-            continue; // the same step again, so that `verify` checks the value
-          }
-          frame.waitingFor = definition.name;
-          const question = definition.question(frame.slots) + (options ? this.messages.formatOptions(options) : "");
-          this.output(returning ? this.messages.resume(this.chain()[0]!.flow.title, question) : question);
-          return;
-        }
-        case "say":
-          this.output(step.text(frame.slots));
-          frame.step++;
-          continue;
-        case "action":
-          await this.run(frame, step.run);
-          frame.step++;
-          continue;
-        case "set":
-          setSlots(frame.slots, step.values);
-          frame.step++;
-          continue;
-        case "goto":
-          frame.step = !step.when || step.when(frame.slots) ? this.indexOf(frame.flow, step.to) : frame.step + 1;
-          continue;
-        case "link": {
-          // e.g. a "return" turns out to be a "complaint": replace the flow, keep what we know
-          this.stack.pop();
-          this.handToParked(frame.flow, frame.slots);
-          if (step.message) this.output(step.message);
-          const carried = Object.fromEntries(step.carry.filter((name) => name in frame.slots).map((name) => [name, frame.slots[name]!]));
-          if (this.resumeParked(step.flow)) {
-            const resumed = this.top!;
-            Object.assign(resumed.slots, carried);
-            for (const name of Object.keys(carried)) resumed.unchecked.add(name);
-          } else await this.push(step.flow, carried, false, new Set());
-          returning = false;
-          continue;
-        }
-        case "call":
-          frame.step++; // where the caller goes on when the called flow ends
-          await this.push(step.flow, frame.slots, true, frame.unchecked);
-          continue;
-      }
+      case "call":
+        setAttributes(span, { target_flow: step.flow });
+        frame.step++; // where the caller goes on when the called flow ends
+        await this.push(step.flow, frame.slots, true, frame.unchecked);
+        return returning;
     }
   }
 
@@ -348,6 +484,15 @@ export class FlowEngine {
     return result;
   }
 
+  /** Runs an action in its span. */
+  private async traceRun(frame: Frame, action: Action, span: TracerSpan): Promise<ActionResult | void> {
+    setAttributes(span, { action_name: action.name || undefined });
+    this.record(span, "input", frame.slots);
+    const result = await this.run(frame, action);
+    this.record(span, "output", result);
+    return result;
+  }
+
   /** Checks a value read while another flow was asking; a turned-down value is cleared. */
   private check(frame: Frame, definition: SlotDefinition): boolean {
     const value = frame.slots[definition.name]!;
@@ -364,12 +509,17 @@ export class FlowEngine {
   }
 
   /** Runs a collect step's `verify`; the value is turned down when the action cleared the slot. */
-  private async verify(frame: Frame, action: Action, slot: string): Promise<boolean> {
-    const result = await this.run(frame, action);
-    if (slot in frame.slots) return true;
-    if (!result?.uncounted) countFailure(frame);
-    frame.noAutoSelect.add(slot); // a single option that failed must not be picked again without asking
-    return false;
+  private verify(frame: Frame, action: Action, slot: string): Promise<boolean> {
+    return this.inSpan("verify", async (span) => {
+      setAttributes(span, { slot });
+      const result = await this.traceRun(frame, action, span);
+      const accepted = slot in frame.slots;
+      setAttributes(span, { accepted });
+      if (accepted) return true;
+      if (!result?.uncounted) countFailure(frame);
+      frame.noAutoSelect.add(slot); // a single option that failed must not be picked again without asking
+      return false;
+    });
   }
 
   private slotDefinition(flow: Flow, name: string): SlotDefinition {
@@ -405,6 +555,11 @@ export class FlowEngine {
       called: frame.called,
     }));
   }
+}
+
+/** Sets `flow_engine.*` attributes; undefined values are left out. */
+function setAttributes(span: TracerSpan, attributes: Record<string, TracerAttributeValue | undefined>): void {
+  for (const [key, value] of Object.entries(attributes)) if (value !== undefined) span.setAttribute(`flow_engine.${key}`, value);
 }
 
 /** One more turned-down value for the collect step the frame stands on. */
