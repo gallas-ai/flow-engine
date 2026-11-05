@@ -9,6 +9,21 @@ for task-oriented conversations. Core principle: **the LLM understands, the code
 questions through the injected `Nlu` interface; what happens next is decided deterministically by walking flow steps.
 The engine never imports LLM code.
 
+## How to work
+
+- **Rasa compatibility (important).** Every proposal follows Rasa in both YAML syntax and conversation behaviour: where
+  Rasa has a counterpart, take its name and its behaviour. Before proposing, look the counterpart up in the
+  [Rasa docs](https://rasa.com/docs/reference/primitives/flows/) and state in the proposal what you found. Where Rasa has
+  no counterpart (e.g. the `Nlu` interface, engine options), the proposal says so. A deviation needs a clear reason:
+  state it in the proposal and, once approved, add it to "Differences from Rasa" in `docs/yaml.md`. A deviation that is
+  hard to reverse also gets an ADR.
+- **Design.** Run `/mattpocock-skills:grill-with-docs` before creating or proposing anything with a decision in it: a
+  new feature, a behaviour change, the public API, the YAML syntax, a new example or docs. Changes with nothing to decide
+  (a typo, a fix to an already agreed spec) go straight to the work.
+- **Implementation.** Run `/mattpocock-skills:tdd` for new features, behaviour changes and bug fixes: failing tests
+  first, red for the right reason, then the implementation, then green. A refactoring keeps the existing tests green;
+  a docs-only change needs no tests.
+
 ## Language
 
 Write everything in this repository in English: code, identifiers, comments, docs, examples, test fixtures, test data,

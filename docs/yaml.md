@@ -326,4 +326,5 @@ Compile your flows in a test, and CI catches typos before a customer does.
 - **Correcting a slot**: a slot that is already filled is not looked for again, so "actually, on Wednesday" doesn't change
   it.
 - **Not supported**: flow guards other than `if: False`, `domain.yml` features beyond the slots and responses above,
-  response variations and buttons, and conditions beyond the table above.
+  response variations and buttons, and conditions beyond the table above. Neither is `nlu_trigger`, because the engine
+  has no intents: `route` picks the flow, and [few-shot examples](nlu.md#few-shot-examples-in-route) can steer it.

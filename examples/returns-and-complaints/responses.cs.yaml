@@ -1,0 +1,4 @@
+responses:
+  utter_ask_order_number: Jaké je číslo vaší objednávky?
+  utter_refund_started: Vrácení peněz za objednávku {order_number} je spuštěné.
+  utter_complaint_opened: Omlouváme se. Reklamace objednávky {order_number} je založená.
