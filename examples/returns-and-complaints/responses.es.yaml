@@ -1,0 +1,4 @@
+responses:
+  utter_ask_order_number: ¿Cuál es su número de pedido?
+  utter_refund_started: El reembolso del pedido {order_number} está en marcha.
+  utter_complaint_opened: Lo sentimos. La reclamación del pedido {order_number} está abierta.

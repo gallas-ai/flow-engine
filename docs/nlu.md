@@ -175,6 +175,69 @@ What makes the NLU work well lives in the flows: a `description` for each flow t
 `description` for each slot tells `extract` what to look for, and `help` gives `answer` the reason behind a question.
 Business rules stay out of the prompts – the engine applies `validate` to whatever the LLM returns.
 
+## Few-shot examples in `route`
+
+Sharpen the flow `description`s first. When the LLM still mixes up two flows, or starts a flow for a plain question,
+show it a few examples. They are part of your NLU's prompt: the engine never sees them, so they need no flow field and
+no engine option. Rasa's place for few-shot examples is the same, its prompt template. Rasa's `nlu_trigger` is a
+different mechanism: it starts a flow from the intent an intent classifier predicts, and the LLM doesn't see those
+examples.
+
+`routeWith` replaces `route` in the Claude NLU above:
+
+```ts
+type Example = { text: string; flow: string | null }; // null = no flow, just answer the message
+
+const EXAMPLES: Example[] = [
+  { text: "this mug arrived cracked", flow: "complaint" },
+  { text: "I don't need this mug any more, I want my money back", flow: "refund" },
+  { text: "how long do I have to return something?", flow: null },
+];
+
+const routeWith = (examples: Example[]): Nlu["route"] => async (text, flows) => {
+  // flows hidden from routing aren't in `flows`, so the LLM doesn't hear about them from an example either
+  const shown = examples.filter(({ flow }) => flow === null || flows.some(({ name }) => name === flow));
+  const { flow } = await ask<{ flow: string | null }>(
+    `A customer wrote to a shop's support. Which task does the message start?
+Answer null if it only asks a question or makes small talk.
+
+Tasks:
+${flows.map((flow) => `- ${flow.name}: ${flow.title}. ${flow.description ?? ""}`).join("\n")}
+
+Examples:
+${shown.map(({ text, flow }) => `"${text}" -> ${flow}`).join("\n")}
+
+Message: ${text}`,
+    {
+      type: "object",
+      properties: { flow: { enum: [...flows.map((flow) => flow.name), null] } },
+      required: ["flow"],
+    },
+  );
+  return flow;
+};
+
+export const claudeNlu: Nlu = {
+  route: routeWith(EXAMPLES),
+  // classifyTurn, extract, choose and answer stay as they are
+};
+```
+
+- **Cover the boundaries, not every flow.** Two or three examples per confusing pair are enough, best taken from real
+  conversations: `refund` against `complaint`, a question about returns against the start of a return.
+- **Include messages that start no flow.** `flow: null` means the same in both places `route` is called: with no
+  question waiting, the bot answers the message; after a task switch, it answers and goes back to its question.
+- **Catch typos in a test.** The filter drops an example with a misspelled flow without a word, and the engine can't
+  check a list it never sees:
+
+  ```ts
+  test("every few-shot example names a flow", () => {
+    for (const { flow } of EXAMPLES) if (flow !== null) expect(flows).toHaveProperty(flow);
+  });
+  ```
+- **Check that they help.** Log the `routed` event from `onEvent` to find wrong picks, and measure on other messages
+  than the ones in the list, because the LLM has already seen those.
+
 ## Example: a keyword NLU for tests
 
 Flows are tested without an LLM: a fake NLU that reacts to keywords makes every test fast and deterministic.
@@ -240,22 +303,27 @@ The engine's own texts (not understood, flow parked, flow cancelled, back to…,
 The engine has no language setting: a conversation is one engine, created with everything in the customer's language.
 Pick the language before the first message. `route`, `classifyTurn`, `extract` and `choose` of the Claude NLU above
 understand any language as they are; only `answer` writes to the customer, so give each language an NLU that answers
-in it:
+in it. [Few-shot examples](#few-shot-examples-in-route) get one list per language, because they show how customers
+phrase a request:
 
 ```ts
-/** claudeNlu, but free answers come in the customer's language. */
-const claudeNluIn = (language: string): Nlu => ({
+/** claudeNlu, but with examples in the customer's language, and free answers in it too. */
+const claudeNluIn = (language: string, examples: Example[]): Nlu => ({
   ...claudeNlu,
+  route: routeWith(examples),
   answer: (text, step) => claudeNlu.answer(`${text}\n\n(Answer in ${language}.)`, step),
 });
 
-const nlu = { en: claudeNlu, cs: claudeNluIn("Czech"), es: claudeNluIn("Spanish") };
+// EXAMPLES_CS and EXAMPLES_ES are lists like EXAMPLES above, written in Czech and Spanish
+const nlu = { en: claudeNlu, cs: claudeNluIn("Czech", EXAMPLES_CS), es: claudeNluIn("Spanish", EXAMPLES_ES) };
 const engine = new FlowEngine({ flows: flows[language], nlu: nlu[language], messages: messages[language], output: send });
 ```
 
 Slot descriptions and flow descriptions can stay in English for every language; only the NLU reads them. The
 [delivery-reschedule](https://github.com/gallas-ai/flow-engine/tree/main/examples/delivery-reschedule) example shows
-the whole setup: responses per language, translated `messages` and translated choice-option labels.
+the whole setup: responses per language, translated `messages` and translated choice-option labels. The
+[returns-and-complaints](https://github.com/gallas-ai/flow-engine/tree/main/examples/returns-and-complaints) example
+shows the few-shot lists for English, Czech and Spanish.
 
 ## Example: a chat in the terminal
 

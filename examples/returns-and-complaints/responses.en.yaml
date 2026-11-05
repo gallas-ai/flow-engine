@@ -1,0 +1,4 @@
+responses:
+  utter_ask_order_number: What is your order number?
+  utter_refund_started: The refund for order {order_number} has started.
+  utter_complaint_opened: We're sorry. The complaint about order {order_number} is open.

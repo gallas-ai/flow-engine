@@ -6,6 +6,16 @@ All notable changes for users of `@gallas-ai/flow-engine`. The format follows
 
 ## [Unreleased]
 
+### Docs & examples
+
+- [Few-shot examples in `route`](https://github.com/gallas-ai/flow-engine/blob/main/docs/nlu.md#few-shot-examples-in-route):
+  how to steer your NLU's choice of flow with a few example messages, also in several languages and for messages that
+  start no flow. It needs no change to your flows or to the engine. The
+  [YAML docs](https://github.com/gallas-ai/flow-engine/blob/main/docs/yaml.md#differences-from-rasa) now also say that
+  Rasa's `nlu_trigger` isn't supported.
+- [examples/returns-and-complaints](https://github.com/gallas-ai/flow-engine/tree/main/examples/returns-and-complaints)
+  shows few-shot examples in English, Czech and Spanish telling two similar flows and a plain question apart.
+
 ## [0.4.0] - 2026-11-04
 
 ### Added
