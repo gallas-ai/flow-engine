@@ -129,6 +129,7 @@ set, it also sends each message as a trace to a
 | [verification](https://github.com/gallas-ai/flow-engine/tree/main/examples/verification) | Checking an answer against a CRM with `verify`, limited retries with `max_attempts`, giving up with `on_exhausted`, values that don't count with `uncounted` |
 | [appointments](https://github.com/gallas-ai/flow-engine/tree/main/examples/appointments) | Two flows sharing one verification with `call`, a flow hidden from routing with `if: False`, checking the slots a call hands back, one answer filling several flows, cancelling a called flow, `persisted_slots` sparing a parked flow its question |
 | [delivery-reschedule](https://github.com/gallas-ai/flow-engine/tree/main/examples/delivery-reschedule) | One flow in English, Czech and Spanish: `responses` per language, translated `messages`, one `Nlu` per language, translated choice-option labels |
+| [table-reservation](https://github.com/gallas-ai/flow-engine/tree/main/examples/table-reservation) | A REST API on two servers behind a load balancer: saving the conversation with `engine.state()` after each message and continuing from it with the `state` option on whichever server gets the next one, locking a conversation |
 | [returns-and-complaints](https://github.com/gallas-ai/flow-engine/tree/main/examples/returns-and-complaints) | Telling two similar flows and a plain question apart with few-shot examples in `route`, one list per language in English, Czech and Spanish |
 
 ## Documentation
@@ -136,6 +137,7 @@ set, it also sends each message as a trace to a
 - [Flows in code](https://github.com/gallas-ai/flow-engine/blob/main/docs/flows-in-code.md) – slots, steps, actions
 - [Flows in YAML](https://github.com/gallas-ai/flow-engine/blob/main/docs/yaml.md) – steps, branching, conditions, responses, differences from Rasa
 - [Connecting an LLM](https://github.com/gallas-ai/flow-engine/blob/main/docs/nlu.md) – the `Nlu` interface and engine options
+- [Saving and restoring a conversation](https://github.com/gallas-ai/flow-engine/blob/main/docs/conversation-state.md) – running on several servers behind a load balancer
 - [Tracing](https://github.com/gallas-ai/flow-engine/blob/main/docs/tracing.md) – OpenTelemetry spans for every message, trying it locally with MLflow
 
 ## Development

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { END, FlowEngine, type ActionResult, type Flow, type FlowEngineEvent, type FlowSummary, type Messages, type Nlu, type Option, type Slots } from "../src/index.ts";
+import { END, FlowEngine, type ActionResult, type ConversationState, type Flow, type FlowEngineEvent, type FlowSummary, type Messages, type Nlu, type Option, type Slots } from "../src/index.ts";
 
 // ───────────────────────── test flows: a small shop ─────────────────────────
 
@@ -81,6 +81,37 @@ const address: Flow = {
   ],
 };
 
+const verify: Flow = {
+  name: "verify",
+  title: "Patient verification",
+  routable: false,
+  slots: [{ name: "birth_year", type: "text", description: "year of birth", question: () => "What is your year of birth?" }],
+  steps: [
+    {
+      kind: "collect",
+      slot: "birth_year",
+      verify: (slots): ActionResult => (slots.birth_year === "1980" ? { setSlots: { patient_id: "P1" } } : { say: "Unknown patient.", setSlots: { birth_year: null } }),
+      maxAttempts: 2,
+      onExhausted: "failed",
+    },
+    { kind: "say", text: () => "Verified." },
+    { kind: "end" },
+    { id: "failed", kind: "say", text: () => "Verification failed." },
+  ],
+};
+
+const booking: Flow = {
+  name: "booking",
+  title: "Book appointment",
+  slots: [{ name: "day", type: "text", description: "day of the appointment", question: () => "Which day?" }],
+  steps: [
+    { kind: "call", flow: "verify" },
+    { kind: "goto", to: END, when: (slots) => !("patient_id" in slots) }, // an END in the called flow ends only that flow
+    { kind: "collect", slot: "day" },
+    { kind: "action", run: (slots) => ({ say: `Booked ${slots.day} for patient ${slots.patient_id}.` }) },
+  ],
+};
+
 // ───────────────────────── a fake keyword NLU ─────────────────────────
 
 const has = (text: string, ...words: string[]) => words.some((word) => text.toLowerCase().includes(word));
@@ -150,6 +181,23 @@ function createEngine(messages?: Partial<Messages>, flows: Record<string, Flow> 
     return said.slice(before);
   };
   return { engine, send, events };
+}
+
+/**
+ * Like `createEngine`, but every message goes to a new engine that continues from the state the previous one left,
+ * passed through JSON – as on servers behind a load balancer.
+ */
+function createRelay(flows: Record<string, Flow>) {
+  let state: string | undefined;
+  let engine: FlowEngine | undefined;
+  const send = async (text: string) => {
+    const said: string[] = [];
+    engine = new FlowEngine({ flows, nlu: keywordNlu, output: (text) => said.push(text), state: state === undefined ? undefined : JSON.parse(state) });
+    await engine.handle(text);
+    state = JSON.stringify(engine.state());
+    return said;
+  };
+  return { send, snapshot: () => engine!.snapshot() };
 }
 
 beforeEach(() => {
@@ -280,37 +328,6 @@ describe("link", () => {
 });
 
 describe("call", () => {
-  const verify: Flow = {
-    name: "verify",
-    title: "Patient verification",
-    routable: false,
-    slots: [{ name: "birth_year", type: "text", description: "year of birth", question: () => "What is your year of birth?" }],
-    steps: [
-      {
-        kind: "collect",
-        slot: "birth_year",
-        verify: (slots): ActionResult => (slots.birth_year === "1980" ? { setSlots: { patient_id: "P1" } } : { say: "Unknown patient.", setSlots: { birth_year: null } }),
-        maxAttempts: 2,
-        onExhausted: "failed",
-      },
-      { kind: "say", text: () => "Verified." },
-      { kind: "end" },
-      { id: "failed", kind: "say", text: () => "Verification failed." },
-    ],
-  };
-
-  const booking: Flow = {
-    name: "booking",
-    title: "Book appointment",
-    slots: [{ name: "day", type: "text", description: "day of the appointment", question: () => "Which day?" }],
-    steps: [
-      { kind: "call", flow: "verify" },
-      { kind: "goto", to: END, when: (slots) => !("patient_id" in slots) }, // an END in the called flow ends only that flow
-      { kind: "collect", slot: "day" },
-      { kind: "action", run: (slots) => ({ say: `Booked ${slots.day} for patient ${slots.patient_id}.` }) },
-    ],
-  };
-
   const create = (flows: Record<string, Flow> = {}) => createEngine(undefined, { booking, verify, address, ...flows });
 
   it("runs the called flow, then the caller goes on with its slots and without a resume line", async () => {
@@ -823,5 +840,56 @@ describe("validation", () => {
     expect(() => createEngine(undefined, broken({ steps: [{ kind: "link", flow: "refund", carry: [] }] }))).toThrow("links to unknown flow refund");
     expect(() => createEngine(undefined, broken({ name: "addr" }))).toThrow(`is registered as "address" but named "addr"`);
     expect(() => createEngine(undefined, broken({ steps: [{ id: "a", kind: "end" }, { id: "a", kind: "end" }] }))).toThrow("step id a is used twice");
+  });
+});
+
+describe("conversation state", () => {
+  /** Plays the messages once in one engine and once with a new engine for every message; both must say the same. */
+  async function compare(flows: Record<string, Flow>, messages: string[]) {
+    const { engine, send } = createEngine(undefined, flows);
+    const relay = createRelay(flows);
+    for (const text of messages) {
+      expect(await relay.send(text), text).toEqual(await send(text));
+      expect(relay.snapshot(), text).toEqual(engine.snapshot());
+    }
+  }
+
+  it("continues the conversation in a new engine", async () => {
+    await compare({ refund, complaint, address }, ["I want a refund", "the mug", "unwanted", "yes"]);
+  });
+
+  it("remembers an answer it couldn't use", async () => {
+    await compare({ refund, complaint, address }, ["refund the mug", "hmm", "whatever"]);
+  });
+
+  it("counts turned-down values toward maxAttempts in a called flow", async () => {
+    await compare({ booking, verify }, ["book an appointment", "1970", "1960"]);
+  });
+
+  it("checks a value read for another flow of the call chain at its own collect step", async () => {
+    const closed: Flow = { ...booking, slots: [{ ...booking.slots[0]!, validate: (value) => (value === "tuesday" ? "Closed on Tuesdays." : null) }] };
+    await compare({ booking: closed, verify }, ["book an appointment", "1970, tuesday", "1980"]);
+  });
+
+  it("keeps asking instead of auto-selecting after the customer named something not among the options", async () => {
+    deliveredItems = [MUG];
+    await compare({ refund, complaint, address }, ["refund the teapot", "what are your opening hours?"]);
+  });
+
+  it("keeps a parked call chain and resumes it", async () => {
+    await compare({ booking, verify, address }, ["book an appointment", "wait, change my address", "Main Street 8", "1980", "tuesday"]);
+  });
+
+  it("rejects a state that doesn't fit the flows when the engine is created", () => {
+    const create = (frame: Partial<ConversationState["frames"][number]>, version = 1) => {
+      const state = { version, frames: [{ flow: "refund", step: 0, slots: {}, waitingFor: "item", called: false, attempts: 0, failures: [], noAutoSelect: [], unchecked: [], ...frame }] };
+      return () => new FlowEngine({ flows: { refund, complaint, address }, nlu: keywordNlu, output: () => {}, state: state as ConversationState });
+    };
+    expect(create({})).not.toThrow();
+    expect(create({}, 2)).toThrow("Conversation state: version 2 isn't supported");
+    expect(create({ flow: "refnd" })).toThrow("Conversation state: frames[0]: unknown flow refnd");
+    expect(create({ step: 10, waitingFor: null })).toThrow("Conversation state: frames[0]: flow refund has no step 10");
+    expect(create({ step: 1 })).toThrow("Conversation state: frames[0]: step 1 of flow refund doesn't collect item");
+    expect(create({ called: true })).toThrow("Conversation state: frames[0]: a called flow needs a flow below it");
   });
 });

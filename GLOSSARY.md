@@ -35,3 +35,10 @@ _Avoid_: Sub-flow stack
 Setting a call chain aside because the customer switched to another task. The chain continues where it stopped once that
 task is over, or as soon as the customer asks for it again.
 _Avoid_: Suspending, pausing, interrupting
+
+## Between messages
+
+**Conversation state**:
+Everything the engine remembers about one conversation between two messages. Saving it and handing it to a new engine
+continues the conversation there, so any server can answer the next message.
+_Avoid_: Session, tracker, snapshot

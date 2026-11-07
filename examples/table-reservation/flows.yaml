@@ -1,0 +1,42 @@
+# Reserving a table: four questions, and every answer may reach a different server behind the load balancer.
+flows:
+  reserve_table:
+    name: Table reservation
+    description: The customer wants to reserve a table in the restaurant.
+    steps:
+      - collect: guests
+        description: how many people are coming
+        rejections:
+          - if: slots.guests > 8
+            utter: utter_too_many_guests
+      - collect: day
+        description: the day of the reservation
+      - collect: time
+        description: the time of the reservation
+      - collect: confirm
+        description: whether the customer confirms the reservation
+        ask_before_filling: true # consent is always asked
+        next:
+          - if: not slots.confirm
+            then:
+              - action: utter_not_reserved
+                next: END
+          - else: reserve
+      - id: reserve
+        action: utter_reserved
+
+slots:
+  guests: { type: number }
+  time:
+    type: choice
+    options: ["18:00", "19:30", "21:00"]
+  confirm: { type: bool }
+
+responses:
+  utter_ask_guests: For how many people?
+  utter_too_many_guests: We seat at most 8 people at one table.
+  utter_ask_day: Which day?
+  utter_ask_time: What time?
+  utter_ask_confirm: A table for {guests} on {day} at {time}. Shall I reserve it?
+  utter_not_reserved: All right, nothing is reserved.
+  utter_reserved: Reserved. See you on {day} at {time}!

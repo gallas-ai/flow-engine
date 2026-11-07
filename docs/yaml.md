@@ -329,6 +329,10 @@ Compile your flows in a test, and CI catches typos before a customer does.
   exporters of its own: you pass a tracer from your OpenTelemetry setup, which exports to Jaeger, an OTLP collector or
   anything else. Span names follow the engine's own classes, as Rasa's follow its own, and attributes take Rasa's names
   where they mean the same. See [Tracing](tracing.md).
+- **Conversation state**: Rasa keeps conversations in a tracker store, as a history of events, and serialises the
+  messages of one conversation with a lock store; both are part of the Rasa server. Here `engine.state()` returns a
+  snapshot of the conversation, and storing it and locking are up to you. See
+  [Saving and restoring a conversation](conversation-state.md).
 - **Not supported**: flow guards other than `if: False`, `domain.yml` features beyond the slots and responses above,
   response variations and buttons, and conditions beyond the table above. Neither is `nlu_trigger`, because the engine
   has no intents: `route` picks the flow, and [few-shot examples](nlu.md#few-shot-examples-in-route) can steer it.

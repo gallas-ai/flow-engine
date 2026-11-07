@@ -78,6 +78,9 @@ from that version's `CHANGELOG.md` section, reruns the checks and publishes via 
     the NLU calls, `fill`, each step and actions. `output` and `emit` add span events to the innermost span. Content
     goes on spans only through `record()`, which checks `recordContent`. `Tracer` is our own subset of OpenTelemetry's,
     not a dependency (`docs/adr/0004-own-tracer-interface.md`).
+  - `state()` returns the conversation state as JSON and the `state` option restores it, rejecting what doesn't fit the
+    flows (`docs/adr/0005-conversation-state-is-a-snapshot.md`). A called frame shares `unchecked` with the frame below,
+    also after a restore.
   - `validateFlows()` checks references (step ids, slots, linked flows) and rejects a `call` to a flow that uses a
     `link`, in the constructor, so broken flows fail at construction rather than mid-conversation.
 - `src/compile.ts` – `compileFlows(data, registry)`: compiles a subset of Rasa's YAML flow syntax into the same `Flow`
@@ -105,6 +108,9 @@ Semantics that are easy to break:
 - `verify` on a collect step is an action. It turns a value down by **clearing the slot** (`setSlots: { x: null }`).
   Turned-down values from `verify` or `validate` count toward `maxAttempts`, after which the flow jumps to `onExhausted`
   (default `END`), unless the `verify` action also returns `uncounted: true`.
+- Every `Frame` field that outlives a message must go through `state()` and the `state` option, with a test in the
+  "conversation state" block of `test/engine.test.ts` that plays a conversation in one engine and with a new engine per
+  message. `answered` is the exception: the collect step uses it up in the message that filled it.
 - Actions receive a copy of the slots and change them only through `ActionResult.setSlots` (`null` deletes a slot).
 
 ## Tests
@@ -150,7 +156,8 @@ column naming the features) and its README's ` ```transcript ` block.
 ## Docs
 
 User-facing documentation is `README.md` plus `docs/flows-in-code.md`, `docs/yaml.md` (including the "Differences from
-Rasa" section) and `docs/nlu.md` (the `Nlu` interface and engine options). The README links to the docs with absolute
+Rasa" section), `docs/nlu.md` (the `Nlu` interface and engine options), `docs/conversation-state.md` (saving and
+restoring a conversation) and `docs/tracing.md`. The README links to the docs with absolute
 GitHub URLs, because it is also rendered on npm.
 
 ## Changelog

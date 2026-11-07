@@ -6,6 +6,20 @@ All notable changes for users of `@gallas-ai/flow-engine`. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Saving and restoring a conversation**: `engine.state()` returns everything the engine remembers about the
+  conversation as JSON, and `new FlowEngine({ …, state })` continues from it. Save it after each message to run your bot
+  on several servers behind a load balancer, or to survive a restart. You store the state and lock the conversation
+  while a message is handled; the constructor throws when a state doesn't fit your flows.
+  [Saving and restoring a conversation](https://github.com/gallas-ai/flow-engine/blob/main/docs/conversation-state.md)
+
+### Docs & examples
+
+- [table-reservation](https://github.com/gallas-ai/flow-engine/tree/main/examples/table-reservation): a REST API with
+  the request and response of Rasa's REST channel, on two servers behind a round-robin load balancer, sharing only a
+  store of conversation states.
+
 ## [0.5.0] - 2026-11-05
 
 ### Added

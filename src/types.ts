@@ -146,6 +146,28 @@ export type FlowEngineEvent =
 /** One frame of the flow stack, as data. `called` = the frame below called it. */
 export type FrameSnapshot = { flow: string; title: string; step: number; waitingFor: string | null; slots: Slots; called: boolean };
 
+/**
+ * Everything the engine remembers about one conversation between two messages, as JSON: `engine.state()` gives it,
+ * the `state` option continues from it. Store it as it is; only `version` is guaranteed, the other fields may change.
+ */
+export type ConversationState = {
+  version: 1;
+  /** The flow stack, bottom first. */
+  frames: {
+    flow: string;
+    step: number;
+    slots: Slots;
+    waitingFor: string | null;
+    called: boolean;
+    /** Answers in a row the engine couldn't use. */
+    attempts: number;
+    /** Turned-down values per collect step: [step index, count]. */
+    failures: [number, number][];
+    noAutoSelect: string[];
+    unchecked: string[];
+  }[];
+};
+
 /** A span attribute value, as OpenTelemetry takes it. */
 export type TracerAttributeValue = string | number | boolean | string[];
 

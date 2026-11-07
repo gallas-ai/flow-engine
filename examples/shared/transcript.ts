@@ -14,9 +14,9 @@ export function transcript(print: (line: string) => void = console.log) {
       botTurn = false;
       lines("customer:", text);
     },
-    /** Pass as the engine's `output`. */
-    bot(text: string) {
-      lines(botTurn ? "" : "bot:", text);
+    /** Pass as the engine's `output`. `label` names who answers, e.g. `bot (a)` for one of several servers. */
+    bot(text: string, label = "bot") {
+      lines(botTurn ? "" : `${label}:`, text);
       botTurn = true;
     },
   };

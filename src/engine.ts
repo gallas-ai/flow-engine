@@ -5,7 +5,7 @@
 // it gets an `Nlu` implementation injected, so it runs just as well with a fake keyword NLU in tests.
 import { defaultMessages } from "./messages.ts";
 import { END } from "./types.ts";
-import type { Action, ActionResult, Flow, FlowEngineEvent, FlowSummary, FrameSnapshot, Messages, Nlu, SlotDefinition, SlotValue, Slots, Step, Tracer, TracerAttributeValue, TracerSpan } from "./types.ts";
+import type { Action, ActionResult, ConversationState, Flow, FlowEngineEvent, FlowSummary, FrameSnapshot, Messages, Nlu, SlotDefinition, SlotValue, Slots, Step, Tracer, TracerAttributeValue, TracerSpan } from "./types.ts";
 
 type Frame = {
   flow: Flow;
@@ -38,6 +38,8 @@ export type FlowEngineOptions = {
   recordContent?: boolean;
   /** Put as they are on the span of each message and each `start`, e.g. `{ "session.id": conversationId }`. */
   traceAttributes?: Record<string, TracerAttributeValue>;
+  /** Continues the conversation another engine left, from its `state()` (docs/conversation-state.md). */
+  state?: ConversationState;
 };
 
 /** The span used when there is no tracer: it records nothing. */
@@ -73,6 +75,35 @@ export class FlowEngine {
     const onEvent = options.onEvent ?? (() => {});
     this.emit = options.tracer ? (event) => this.traceEvent(event, onEvent) : onEvent;
     this.messages = { ...defaultMessages, ...options.messages };
+    if (options.state) this.restore(options.state);
+  }
+
+  /** Continues from a saved state. Rejects what doesn't fit the flows, e.g. a state saved before they changed. */
+  private restore(state: ConversationState): void {
+    if (state.version !== 1) throw new Error(`Conversation state: version ${state.version} isn't supported`);
+    // `answered` isn't saved: the collect step uses it up in the message that filled it
+    for (const [index, saved] of state.frames.entries()) {
+      const fail = (message: string) => { throw new Error(`Conversation state: frames[${index}]: ${message}`); };
+      const flow = this.flows[saved.flow];
+      if (!flow) return fail(`unknown flow ${saved.flow}`);
+      if (!(Number.isInteger(saved.step) && saved.step >= 0 && saved.step <= flow.steps.length)) fail(`flow ${flow.name} has no step ${saved.step}`);
+      const step = flow.steps[saved.step];
+      if (saved.waitingFor !== null && !(step?.kind === "collect" && step.slot === saved.waitingFor)) fail(`step ${saved.step} of flow ${flow.name} doesn't collect ${saved.waitingFor}`);
+      if (saved.called && !this.top) fail("a called flow needs a flow below it");
+      this.stack.push({
+        flow,
+        step: saved.step,
+        slots: { ...saved.slots },
+        waitingFor: saved.waitingFor ?? undefined,
+        attempts: saved.attempts,
+        failures: new Map(saved.failures),
+        noAutoSelect: new Set(saved.noAutoSelect),
+        answered: new Set(),
+        called: saved.called,
+        // shared along a call chain, like `push` does it
+        unchecked: saved.called ? this.top!.unchecked : new Set(saved.unchecked),
+      });
+    }
   }
 
   private get top() { return this.stack.at(-1); }
@@ -542,6 +573,24 @@ export class FlowEngine {
     const index = flow.steps.findIndex((step) => step.id === id);
     if (index < 0) throw new Error(`Flow ${flow.name} has no step ${id}`);
     return index;
+  }
+
+  /** Everything the engine remembers about the conversation, as JSON: a new engine continues from it (option `state`). */
+  state(): ConversationState {
+    return {
+      version: 1,
+      frames: this.stack.map((frame) => ({
+        flow: frame.flow.name,
+        step: frame.step,
+        slots: { ...frame.slots },
+        waitingFor: frame.waitingFor ?? null,
+        called: frame.called,
+        attempts: frame.attempts,
+        failures: [...frame.failures],
+        noAutoSelect: [...frame.noAutoSelect],
+        unchecked: [...frame.unchecked],
+      })),
+    };
   }
 
   /** The flow stack as data, bottom first. */

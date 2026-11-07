@@ -5,6 +5,7 @@ export { END, TURN_TYPES } from "./types.ts";
 export type {
   Action,
   ActionResult,
+  ConversationState,
   Extraction,
   Flow,
   FlowEngineEvent,
