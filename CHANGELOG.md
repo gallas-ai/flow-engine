@@ -6,6 +6,14 @@ All notable changes for users of `@gallas-ai/flow-engine`. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`author-flows` agent skill**: the package now ships a skill for Claude Code, GitHub Copilot and other agents. It
+  interviews whoever decides what your bot does, writes a flow brief for them to approve, and turns it into flows YAML
+  that compiles, plus a list of the actions your developers have to write. The package also ships `docs/` now, which the
+  skill reads.
+  [Writing flows with an agent](https://github.com/gallas-ai/flow-engine/blob/main/docs/author-flows.md)
+
 ## [0.6.0] - 2026-11-08
 
 ### Added

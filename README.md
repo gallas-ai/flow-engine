@@ -117,6 +117,19 @@ const flows = compileFlows(parse(await readFile("flows.yaml", "utf8")), {
 
 YAML and code flows produce the same `Flow` objects and can be mixed.
 
+## Writing flows with an agent
+
+The package comes with `author-flows`, an agent skill for Claude Code, GitHub Copilot and other agents. It interviews
+whoever decides what the bot does, writes an approved flow brief, and turns it into flows YAML that compiles.
+
+```bash
+npx skills@latest add ./node_modules/@gallas-ai/flow-engine --skill author-flows
+npx skills@latest add mattpocock/skills --skill grilling
+```
+
+Run the first line again after upgrading the package. See
+[Writing flows with an agent](https://github.com/gallas-ai/flow-engine/blob/main/docs/author-flows.md).
+
 ## Examples
 
 Each example is one use case, written both in YAML and in code, with a fake NLU so it runs without an LLM. Run one
@@ -136,6 +149,7 @@ set, it also sends each message as a trace to a
 
 - [Flows in code](https://github.com/gallas-ai/flow-engine/blob/main/docs/flows-in-code.md) – slots, steps, actions
 - [Flows in YAML](https://github.com/gallas-ai/flow-engine/blob/main/docs/yaml.md) – steps, branching, conditions, responses, differences from Rasa
+- [Writing flows with an agent](https://github.com/gallas-ai/flow-engine/blob/main/docs/author-flows.md) – the `author-flows` skill, from an interview to flows YAML
 - [Connecting an LLM](https://github.com/gallas-ai/flow-engine/blob/main/docs/nlu.md) – the `Nlu` interface and engine options
 - [Saving and restoring a conversation](https://github.com/gallas-ai/flow-engine/blob/main/docs/conversation-state.md) – running on several servers behind a load balancer
 - [Tracing](https://github.com/gallas-ai/flow-engine/blob/main/docs/tracing.md) – OpenTelemetry spans for every message, trying it locally with MLflow

@@ -10,6 +10,18 @@ The human language a conversation is held in, named by a two-letter code (`en`, 
 conversation and changes only texts, never the flow logic.
 _Avoid_: Locale, translation
 
+## Writing flows
+
+**Flow author**:
+The person who decides what the flows do: which tasks the bot handles, what it needs to know, where it branches and what
+it says. Not the customer, who chats with the bot, and not necessarily a developer.
+_Avoid_: Business user, bot designer
+
+**Flow brief**:
+The flow author's description of flows in business terms, approved before any YAML is written and kept as the source of
+truth for them.
+_Avoid_: Spec, requirements, process document
+
 ## Moving between flows
 
 **Routing**:

@@ -29,7 +29,9 @@
   },
   "files": [
     "dist",
-    "src"
+    "src",
+    "docs",
+    "skills"
   ],
   "publishConfig": {
     "access": "public"

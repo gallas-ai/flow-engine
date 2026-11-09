@@ -157,8 +157,17 @@ column naming the features) and its README's ` ```transcript ` block.
 
 User-facing documentation is `README.md` plus `docs/flows-in-code.md`, `docs/yaml.md` (including the "Differences from
 Rasa" section), `docs/nlu.md` (the `Nlu` interface and engine options), `docs/conversation-state.md` (saving and
-restoring a conversation) and `docs/tracing.md`. The README links to the docs with absolute
+restoring a conversation), `docs/tracing.md` and `docs/author-flows.md`. The README links to the docs with absolute
 GitHub URLs, because it is also rendered on npm.
+
+## The `author-flows` skill
+
+`skills/author-flows/` ships in the npm package and is installed with `npx skills add` from `node_modules`, so it works
+in any agent that reads `SKILL.md`. It reads `docs/yaml.md` and `src/compile.ts` of the installed version, so it only
+holds what those don't say. Every change to the YAML syntax also updates `skills/author-flows/brief-to-yaml.md`, and
+`brief-template.md` when the change gives the flow author something new to decide. `scripts/check-flows.mjs` is plain
+JavaScript because Node doesn't strip types under `node_modules`. `test/author-flows.test.ts` runs it in a project laid
+out like a real install.
 
 ## Changelog
 
